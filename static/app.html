@@ -1719,7 +1719,9 @@
           alert('Brak adresu email odbiorcy — nie można wysłać.');
           return;
         }
+        if (email.status === 'sent' || email._sending) return;
         if (!confirm(`Wysłać email do ${email.recipient_email} i zaplanować ${(email.follow_ups || []).length} follow-upów?`)) return;
+        email._sending = true;
         try {
           const r = await this.apiFetch(`${API}/api/emails/${email.id}/send`, { method: 'POST' });
           email.status = 'sent';
@@ -1728,6 +1730,8 @@
           }
         } catch(e) {
           alert('Błąd wysyłki: ' + (e.message || e));
+        } finally {
+          email._sending = false;
         }
       },
 

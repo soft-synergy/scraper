@@ -1119,6 +1119,8 @@ async def send_email_now(
         raise HTTPException(status_code=404, detail="Not found")
     if not email.recipient_email:
         raise HTTPException(status_code=400, detail="Brak adresu email odbiorcy")
+    if email.status == "sent":
+        raise HTTPException(status_code=409, detail="Ten email został już wysłany")
 
     # Send main email
     smtp_cfg = get_user_smtp_config(current_user)
