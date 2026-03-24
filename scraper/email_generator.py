@@ -16,7 +16,7 @@ import httpx
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "openai/gpt-oss-safeguard-20b:nitro"
+MODEL = "xiaomi/mimo-v2-omni"
 
 SENDER_NAME = "Antoni Seba"
 SENDER_TITLE = "specjalista ds. bezpieczeństwa stron internetowych"
@@ -332,7 +332,8 @@ async def _call_llm(prompt: str) -> dict:
         )
         resp.raise_for_status()
 
-    text = resp.json()["choices"][0]["message"]["content"]
+    raw = resp.json()
+    text = raw["choices"][0]["message"].get("content") or ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
     json_match = re.search(r'\{[^{}]*"subject"[^{}]*"body"[^{}]*\}', text, re.DOTALL)
