@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+aiosqlite
+httpx
+beautifulsoup4
+lxml
+python-multipart
+aiofiles
+anthropic
+passlib[bcrypt]
+python-jose[cryptography]
+stripe
+python-dotenv
+bcrypt

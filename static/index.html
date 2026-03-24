@@ -1,0 +1,1292 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Niche Website Scraper</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .score-ring { transition: stroke-dashoffset 0.6s ease; }
+    .badge { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium; }
+    .animate-spin-slow { animation: spin 3s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="h-full bg-gray-950 text-gray-100 font-sans" x-data="app()" x-cloak>
+
+<!-- Sidebar + Layout -->
+<div class="flex h-full">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col flex-shrink-0">
+    <div class="p-5 border-b border-gray-800">
+      <div class="flex items-center gap-2">
+        <svg class="w-7 h-7 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <span class="text-lg font-bold text-white">WebLeadScraper</span>
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Find outdated websites in any niche</p>
+    </div>
+
+    <nav class="flex-1 p-4 space-y-1">
+      <button @click="currentView = 'dashboard'; currentCampaignId = null"
+        :class="currentView === 'dashboard' ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'"
+        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+        </svg>
+        Dashboard
+      </button>
+      <button @click="openNewCampaign()"
+        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        New Campaign
+      </button>
+    </nav>
+
+    <!-- Global Stats -->
+    <div class="p-4 border-t border-gray-800 space-y-2">
+      <p class="text-xs text-gray-500 uppercase font-semibold tracking-wider">Global Stats</p>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="bg-gray-800 rounded p-2 text-center">
+          <div class="text-lg font-bold text-violet-400" x-text="globalStats.total_campaigns"></div>
+          <div class="text-xs text-gray-500">Campaigns</div>
+        </div>
+        <div class="bg-gray-800 rounded p-2 text-center">
+          <div class="text-lg font-bold text-blue-400" x-text="globalStats.total_websites"></div>
+          <div class="text-xs text-gray-500">Sites</div>
+        </div>
+        <div class="bg-gray-800 rounded p-2 text-center">
+          <div class="text-lg font-bold text-green-400" x-text="globalStats.total_emails"></div>
+          <div class="text-xs text-gray-500">Emails</div>
+        </div>
+        <div class="bg-gray-800 rounded p-2 text-center">
+          <div class="text-lg font-bold text-yellow-400" x-text="globalStats.total_phones"></div>
+          <div class="text-xs text-gray-500">Phones</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-auto">
+
+    <!-- ══════════════════════════════════════════════════════════════ DASHBOARD -->
+    <div x-show="currentView === 'dashboard'" x-transition class="p-6 max-w-7xl mx-auto">
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-white">Campaigns</h1>
+        <button @click="openNewCampaign()"
+          class="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-medium transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          New Campaign
+        </button>
+      </div>
+
+      <!-- Loading state -->
+      <div x-show="loadingCampaigns" class="text-center py-12 text-gray-500">
+        <svg class="w-8 h-8 mx-auto mb-3 animate-spin-slow text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Loading campaigns...
+      </div>
+
+      <!-- Empty state -->
+      <div x-show="!loadingCampaigns && campaigns.length === 0"
+        class="text-center py-16 bg-gray-900 rounded-xl border border-gray-800">
+        <svg class="w-16 h-16 mx-auto mb-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <p class="text-gray-400 text-lg font-medium">No campaigns yet</p>
+        <p class="text-gray-600 mt-1 mb-4">Create your first campaign to start discovering websites</p>
+        <button @click="openNewCampaign()"
+          class="px-5 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-medium transition-colors">
+          Create First Campaign
+        </button>
+      </div>
+
+      <!-- Campaigns grid -->
+      <div x-show="!loadingCampaigns && campaigns.length > 0" class="grid gap-4">
+        <template x-for="c in campaigns" :key="c.id">
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-violet-700 transition-colors cursor-pointer"
+            @click="openCampaign(c.id)">
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-3 mb-1">
+                  <h3 class="font-semibold text-white text-lg" x-text="c.name"></h3>
+                  <span :class="{
+                    'bg-yellow-900 text-yellow-300': c.status === 'running',
+                    'bg-green-900 text-green-300': c.status === 'completed',
+                    'bg-red-900 text-red-300': c.status === 'failed',
+                    'bg-gray-700 text-gray-300': c.status === 'pending',
+                  }" class="badge" x-text="c.status"></span>
+                </div>
+                <p class="text-gray-400 text-sm">
+                  Keyword: <span class="text-violet-400 font-mono" x-text="c.keyword"></span>
+                  <span class="ml-2 text-xs text-gray-600" x-text="c.country !== 'auto' ? '· ' + c.country.toUpperCase() : ''"></span>
+                </p>
+                <p class="text-gray-500 text-xs mt-1" x-text="new Date(c.created_at).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'})"></p>
+              </div>
+              <div class="flex items-center gap-6 text-center ml-6">
+                <div>
+                  <div class="text-xl font-bold text-white" x-text="c.total_sites"></div>
+                  <div class="text-xs text-gray-500">Found</div>
+                </div>
+                <div>
+                  <div class="text-xl font-bold text-green-400" x-text="c.done_sites"></div>
+                  <div class="text-xs text-gray-500">Done</div>
+                </div>
+                <div>
+                  <div class="text-xl font-bold text-red-400" x-text="c.error_sites"></div>
+                  <div class="text-xs text-gray-500">Error</div>
+                </div>
+                <div @click.stop="deleteCampaign(c.id)" class="p-2 text-gray-600 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- Progress bar for running campaigns -->
+            <div x-show="c.status === 'running' || (c.status === 'completed' && c.total_sites > 0)" class="mt-3">
+              <div class="flex justify-between text-xs text-gray-500 mb-1">
+                <span x-text="c.status === 'running' ? 'Analyzing...' : 'Complete'"></span>
+                <span x-text="c.total_sites > 0 ? Math.round((c.done_sites + c.error_sites) / c.total_sites * 100) + '%' : '0%'"></span>
+              </div>
+              <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                <div class="h-full bg-violet-600 rounded-full transition-all duration-500"
+                  :style="`width: ${c.total_sites > 0 ? Math.round((c.done_sites + c.error_sites) / c.total_sites * 100) : 0}%`"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════ CAMPAIGN DETAIL -->
+    <div x-show="currentView === 'campaign'" x-transition class="p-6 max-w-7xl mx-auto">
+
+      <!-- Back + Header -->
+      <div class="flex items-center gap-4 mb-6">
+        <button @click="currentView = 'dashboard'; stopPolling()" class="text-gray-400 hover:text-white transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+        </button>
+        <div class="flex-1">
+          <div class="flex items-center gap-3">
+            <h1 class="text-2xl font-bold text-white" x-text="currentCampaign?.name || 'Loading...'"></h1>
+            <span x-show="currentCampaign" :class="{
+              'bg-yellow-900 text-yellow-300': currentCampaign?.status === 'running',
+              'bg-green-900 text-green-300': currentCampaign?.status === 'completed',
+              'bg-red-900 text-red-300': currentCampaign?.status === 'failed',
+              'bg-gray-700 text-gray-300': currentCampaign?.status === 'pending',
+            }" class="badge" x-text="currentCampaign?.status"></span>
+          </div>
+          <p class="text-gray-400 text-sm mt-0.5" x-text="'Keyword: ' + (currentCampaign?.keyword || '')"></p>
+        </div>
+        <div class="flex gap-2">
+          <button @click="showBulkEmailModal = true"
+            class="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white rounded-lg text-sm font-medium transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.344.346A3.999 3.999 0 0114 18v1a2 2 0 01-2 2h-0a2 2 0 01-2-2v-1a4 4 0 00-1.172-2.828l-.344-.346z"/>
+            </svg>
+            Bulk Emails
+          </button>
+          <button @click="exportCsv()" class="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Progress bar when discovering/running -->
+      <div x-show="progress && (progress.status === 'running' || progress.status === 'discovering')" class="mb-5 bg-gray-900 border border-gray-800 rounded-xl p-4">
+
+        <!-- DISCOVERY PHASE - live log -->
+        <div x-show="progress.is_discovering" class="py-2">
+          <div class="flex items-center gap-3 mb-3">
+            <svg class="w-5 h-5 text-violet-400 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span class="text-violet-400 font-semibold">Odkrywanie stron...</span>
+            <span class="text-xs text-gray-500 ml-auto">odświeżam co 4s</span>
+          </div>
+          <div class="h-1 bg-gray-800 rounded-full overflow-hidden mb-3">
+            <div class="h-full bg-violet-600/60 rounded-full" style="width: 100%; animation: pulse 2s infinite"></div>
+          </div>
+          <!-- Live log terminal -->
+          <div class="bg-gray-950 border border-gray-700 rounded-lg p-3 font-mono text-xs space-y-1 max-h-48 overflow-y-auto" id="discovery-log">
+            <template x-if="!progress.discovery_log?.length">
+              <div class="text-gray-600 animate-pulse">Inicjalizacja...</div>
+            </template>
+            <template x-for="(msg, idx) in (progress.discovery_log || [])" :key="idx">
+              <div :class="{
+                'text-green-400': msg.includes('GOTOWE') || msg.includes('gotowe'),
+                'text-red-400': msg.includes('BŁĄD'),
+                'text-yellow-400': msg.includes('%'),
+                'text-violet-300': msg.includes('[1/3]') || msg.includes('[2/3]') || msg.includes('[3/3]'),
+                'text-gray-400': !msg.includes('GOTOWE') && !msg.includes('BŁĄD') && !msg.includes('%') && !msg.includes('/3]'),
+              }">
+                <span class="text-gray-600 mr-1">›</span>
+                <span x-text="msg"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- ANALYSIS PHASE -->
+        <div x-show="!progress.is_discovering">
+          <div class="flex justify-between text-sm text-gray-400 mb-2">
+            <span>
+              <span class="text-yellow-400 font-medium animate-pulse">Analizowanie stron...</span>
+              <span class="ml-2" x-text="`${progress.done + progress.error} / ${progress.total} przetworzono`"></span>
+            </span>
+            <span x-text="`${progress.percent_complete}%`"></span>
+          </div>
+          <div class="h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div class="h-full bg-violet-600 rounded-full transition-all duration-500"
+              :style="`width: ${progress.percent_complete}%`"></div>
+          </div>
+          <div class="flex gap-4 mt-2 text-xs text-gray-500">
+            <span>Oczekuje: <span class="text-white" x-text="progress.pending"></span></span>
+            <span>Analiza: <span class="text-yellow-400" x-text="progress.analyzing"></span></span>
+            <span>Gotowe: <span class="text-green-400" x-text="progress.done"></span></span>
+            <span>Błąd: <span class="text-red-400" x-text="progress.error"></span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div x-show="campaignStats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-white" x-text="campaignStats?.avg_outdated_score?.toFixed(0) || '-'"></div>
+          <div class="text-xs text-gray-500 mt-0.5">Avg Outdated Score</div>
+          <div class="text-xs mt-1" :class="getOutdatedColor(campaignStats?.avg_outdated_score || 0)"
+            x-text="getOutdatedLabel(campaignStats?.avg_outdated_score || 0)"></div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-white" x-text="campaignStats?.avg_security_score?.toFixed(0) || '-'"></div>
+          <div class="text-xs text-gray-500 mt-0.5">Avg Security Score</div>
+          <div class="text-xs mt-1" :class="getSecurityColor(campaignStats?.avg_security_score || 0)"
+            x-text="getSecurityLabel(campaignStats?.avg_security_score || 0)"></div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-green-400" x-text="campaignStats?.total_emails || 0"></div>
+          <div class="text-xs text-gray-500 mt-0.5">Emails Found</div>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-red-400" x-text="campaignStats?.no_https_count || 0"></div>
+          <div class="text-xs text-gray-500 mt-0.5">No HTTPS</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+        <div class="flex flex-wrap gap-3 items-center">
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400">Min Outdated:</label>
+            <input type="number" x-model.number="filters.min_outdated" min="0" max="100"
+              class="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white" placeholder="0">
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400">Max Security:</label>
+            <input type="number" x-model.number="filters.max_security" min="0" max="100"
+              class="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white" placeholder="100">
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400">CMS:</label>
+            <select x-model="filters.cms" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white">
+              <option value="">Any</option>
+              <option value="WordPress">WordPress</option>
+              <option value="Joomla">Joomla</option>
+              <option value="Drupal">Drupal</option>
+              <option value="none">No CMS</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400">Has Email:</label>
+            <select x-model="filters.has_email" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white">
+              <option value="">Any</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-400">Sort:</label>
+            <select x-model="filters.sort" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white">
+              <option value="outdated_score">Outdated Score</option>
+              <option value="security_score">Security Score</option>
+              <option value="domain">Domain</option>
+              <option value="analyzed_at">Analyzed At</option>
+            </select>
+            <select x-model="filters.order" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white">
+              <option value="desc">DESC</option>
+              <option value="asc">ASC</option>
+            </select>
+          </div>
+          <button @click="applyFilters()" class="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-medium transition-colors">
+            Apply
+          </button>
+          <button @click="resetFilters()" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-medium transition-colors">
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- Websites table -->
+      <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-gray-800 text-left">
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Website</th>
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Outdated</th>
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Security</th>
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">CMS</th>
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">HTTPS</th>
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Contacts</th>
+                <th class="px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800">
+              <template x-if="loadingWebsites">
+                <tr>
+                  <td colspan="7" class="text-center py-8 text-gray-500">Loading websites...</td>
+                </tr>
+              </template>
+              <template x-if="!loadingWebsites && websiteList.length === 0">
+                <tr>
+                  <td colspan="7" class="text-center py-8 text-gray-500">
+                    <span x-show="progress && (progress.status === 'running' || progress.status === 'pending')">
+                      Scraping in progress... websites will appear here shortly.
+                    </span>
+                    <span x-show="!progress || (progress.status !== 'running' && progress.status !== 'pending')">
+                      No websites found.
+                    </span>
+                  </td>
+                </tr>
+              </template>
+              <template x-for="site in websiteList" :key="site.id">
+                <tr class="hover:bg-gray-800/50 cursor-pointer transition-colors" @click="openWebsite(site)">
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-white text-sm" x-text="site.domain"></div>
+                    <div class="text-xs text-gray-500 truncate max-w-xs" x-text="site.title || site.url"></div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <template x-if="site.outdated_score !== null && site.outdated_score !== undefined">
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <div class="w-8 h-8 flex-shrink-0">
+                            <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90">
+                              <circle cx="18" cy="18" r="14" fill="none" stroke="#374151" stroke-width="4"/>
+                              <circle cx="18" cy="18" r="14" fill="none"
+                                :stroke="getOutdatedHex(site.outdated_score)"
+                                stroke-width="4" stroke-linecap="round"
+                                :stroke-dasharray="`${site.outdated_score * 0.88} 88`"
+                                class="score-ring"/>
+                            </svg>
+                          </div>
+                          <div>
+                            <div class="font-bold text-sm" :class="getOutdatedColor(site.outdated_score)" x-text="site.outdated_score"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="site.outdated_score === null || site.outdated_score === undefined">
+                      <span class="text-gray-600">—</span>
+                    </template>
+                  </td>
+                  <td class="px-4 py-3">
+                    <template x-if="site.security_score !== null && site.security_score !== undefined">
+                      <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 flex-shrink-0">
+                          <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90">
+                            <circle cx="18" cy="18" r="14" fill="none" stroke="#374151" stroke-width="4"/>
+                            <circle cx="18" cy="18" r="14" fill="none"
+                              :stroke="getSecurityHex(site.security_score)"
+                              stroke-width="4" stroke-linecap="round"
+                              :stroke-dasharray="`${site.security_score * 0.88} 88`"
+                              class="score-ring"/>
+                          </svg>
+                        </div>
+                        <div class="font-bold text-sm" :class="getSecurityColor(site.security_score)" x-text="site.security_score"></div>
+                      </div>
+                    </template>
+                    <template x-if="site.security_score === null || site.security_score === undefined">
+                      <span class="text-gray-600">—</span>
+                    </template>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span x-show="site.outdated_result?.cms_name"
+                      class="badge bg-blue-900 text-blue-300" x-text="site.outdated_result?.cms_name || ''"></span>
+                    <span x-show="!site.outdated_result?.cms_name" class="text-gray-600 text-xs">—</span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <template x-if="site.security_result">
+                      <span :class="site.security_result.is_https ? 'text-green-400' : 'text-red-400'">
+                        <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path x-show="site.security_result.is_https" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                          <path x-show="!site.security_result.is_https" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <span class="text-xs ml-0.5" x-text="site.security_result.is_https ? 'HTTPS' : 'HTTP'"></span>
+                      </span>
+                    </template>
+                    <span x-show="!site.security_result" class="text-gray-600">—</span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="flex gap-2 text-xs">
+                      <span x-show="site.contacts?.filter(c => c.type === 'email').length > 0"
+                        class="badge bg-green-900 text-green-300"
+                        x-text="`✉ ${site.contacts.filter(c => c.type === 'email').length}`"></span>
+                      <span x-show="site.contacts?.filter(c => c.type === 'phone').length > 0"
+                        class="badge bg-blue-900 text-blue-300"
+                        x-text="`☎ ${site.contacts.filter(c => c.type === 'phone').length}`"></span>
+                      <span x-show="!site.contacts?.length" class="text-gray-600">—</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span :class="{
+                      'bg-green-900 text-green-300': site.status === 'done',
+                      'bg-red-900 text-red-300': site.status === 'error',
+                      'bg-yellow-900 text-yellow-300': site.status === 'analyzing',
+                      'bg-gray-700 text-gray-400': site.status === 'pending',
+                    }" class="badge" x-text="site.status"></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div x-show="pagination.total > pagination.page_size" class="border-t border-gray-800 p-3 flex items-center justify-between">
+          <span class="text-xs text-gray-500" x-text="`${pagination.total} websites total`"></span>
+          <div class="flex gap-2">
+            <button @click="changePage(pagination.page - 1)" :disabled="pagination.page <= 1"
+              class="px-3 py-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-white rounded text-xs transition-colors">
+              Prev
+            </button>
+            <span class="px-3 py-1 text-xs text-gray-400" x-text="`Page ${pagination.page}`"></span>
+            <button @click="changePage(pagination.page + 1)" :disabled="(pagination.page * pagination.page_size) >= pagination.total"
+              class="px-3 py-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-white rounded text-xs transition-colors">
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ NEW CAMPAIGN MODAL -->
+<div x-show="showNewCampaign" x-transition class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6" @click.stop>
+    <h2 class="text-xl font-bold text-white mb-5">New Campaign</h2>
+    <form @submit.prevent="createCampaign()">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Campaign Name</label>
+          <input x-model="newCampaign.name" type="text" required placeholder="e.g. Dentists NYC Q1 2026"
+            class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Niche Keyword</label>
+          <input x-model="newCampaign.keyword" type="text" required placeholder="e.g. dentists in Chicago or dentysta"
+            class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+          <p class="text-xs text-gray-600 mt-1">Podaj niszę: "dentysta", "plumbers Miami", "law firms New York"</p>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Country / Market</label>
+          <select x-model="newCampaign.country"
+            class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            <option value="auto">Auto-detect (recommended)</option>
+            <option value="us">🇺🇸 United States — Yellow Pages + Yelp + US cities</option>
+            <option value="pl">🇵🇱 Poland — Panorama Firm + polskie miasta</option>
+            <option value="eu">🇪🇺 Europe — major EU cities</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">
+            Max Websites: <span class="text-violet-400 font-bold" x-text="newCampaign.max_sites"></span>
+          </label>
+          <input x-model.number="newCampaign.max_sites" type="range" min="50" max="2000" step="50"
+            class="w-full accent-violet-600">
+          <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+            <span>50</span>
+            <span class="text-yellow-500">500 = ~5min</span>
+            <span class="text-orange-500">1000 = ~15min</span>
+            <span>2000</span>
+          </div>
+          <p class="text-xs text-gray-600 mt-1">
+            Więcej stron = dłuższy discovery. Dla polskiej niszy ustaw 500-1000.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex gap-3 mt-6">
+        <button type="button" @click="showNewCampaign = false"
+          class="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors">
+          Cancel
+        </button>
+        <button type="submit" :disabled="creatingCampaign"
+          class="flex-1 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 text-white rounded-lg text-sm font-medium transition-colors">
+          <span x-show="!creatingCampaign">Start Scraping</span>
+          <span x-show="creatingCampaign">Starting...</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ WEBSITE DETAIL MODAL -->
+<div x-show="selectedWebsite" x-transition class="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/80 overflow-y-auto">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-4xl my-8" @click.stop>
+    <!-- Header -->
+    <div class="p-5 border-b border-gray-800 flex items-start justify-between">
+      <div>
+        <h2 class="text-xl font-bold text-white" x-text="selectedWebsite?.domain"></h2>
+        <a :href="selectedWebsite?.url" target="_blank" class="text-xs text-violet-400 hover:underline" x-text="selectedWebsite?.url"></a>
+        <div class="text-sm text-gray-400 mt-0.5" x-text="selectedWebsite?.title || 'No title'"></div>
+      </div>
+      <button @click="selectedWebsite = null" class="text-gray-500 hover:text-white transition-colors p-1">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="p-5 space-y-5">
+      <!-- Scores row -->
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Outdated Score -->
+        <div class="bg-gray-800 rounded-xl p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="font-semibold text-white">Outdated Score</h3>
+              <p class="text-xs text-gray-500">Higher = more outdated</p>
+            </div>
+            <div class="text-4xl font-black" :class="getOutdatedColor(selectedWebsite?.outdated_score || 0)"
+              x-text="selectedWebsite?.outdated_score ?? '—'"></div>
+          </div>
+          <div x-show="selectedWebsite?.outdated_result" class="space-y-1.5 text-xs">
+            <div class="flex justify-between text-gray-400">
+              <span>Copyright Year</span>
+              <span class="text-white" x-text="selectedWebsite?.outdated_result?.copyright_year || 'Not found'"></span>
+            </div>
+            <div class="flex justify-between text-gray-400">
+              <span>CMS</span>
+              <span class="text-white" x-text="selectedWebsite?.outdated_result?.cms_name ? (selectedWebsite.outdated_result.cms_name + (selectedWebsite.outdated_result.cms_version ? ' ' + selectedWebsite.outdated_result.cms_version : '')) : 'Not detected'"></span>
+            </div>
+            <div class="flex justify-between text-gray-400">
+              <span>jQuery</span>
+              <span class="text-white" x-text="selectedWebsite?.outdated_result?.jquery_version || 'Not detected'"></span>
+            </div>
+            <div class="flex justify-between text-gray-400">
+              <span>Flash</span>
+              <span :class="selectedWebsite?.outdated_result?.has_flash ? 'text-red-400' : 'text-green-400'"
+                x-text="selectedWebsite?.outdated_result?.has_flash ? 'DETECTED' : 'None'"></span>
+            </div>
+            <div class="flex justify-between text-gray-400">
+              <span>Mobile Viewport</span>
+              <span :class="selectedWebsite?.outdated_result?.has_viewport_meta ? 'text-green-400' : 'text-red-400'"
+                x-text="selectedWebsite?.outdated_result?.has_viewport_meta ? 'Yes' : 'Missing'"></span>
+            </div>
+          </div>
+          <!-- Outdated Issues -->
+          <div x-show="selectedWebsite?.outdated_result?.issues?.length > 0" class="mt-3">
+            <p class="text-xs font-semibold text-gray-400 mb-1">Issues Found:</p>
+            <ul class="space-y-1">
+              <template x-for="issue in selectedWebsite?.outdated_result?.issues || []" :key="issue">
+                <li class="flex items-start gap-1.5 text-xs text-yellow-300">
+                  <svg class="w-3 h-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                  </svg>
+                  <span x-text="issue"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Security Score -->
+        <div class="bg-gray-800 rounded-xl p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="font-semibold text-white">Security Score</h3>
+              <p class="text-xs text-gray-500">Higher = more secure</p>
+            </div>
+            <div class="text-4xl font-black" :class="getSecurityColor(selectedWebsite?.security_score || 0)"
+              x-text="selectedWebsite?.security_score ?? '—'"></div>
+          </div>
+          <div x-show="selectedWebsite?.security_result" class="space-y-1.5 text-xs">
+            <div class="flex justify-between text-gray-400">
+              <span>HTTPS</span>
+              <span :class="selectedWebsite?.security_result?.is_https ? 'text-green-400' : 'text-red-400'"
+                x-text="selectedWebsite?.security_result?.is_https ? 'Enabled' : 'NOT ENABLED'"></span>
+            </div>
+            <div class="flex justify-between text-gray-400">
+              <span>SSL Certificate</span>
+              <span :class="selectedWebsite?.security_result?.ssl_valid ? 'text-green-400' : (selectedWebsite?.security_result?.ssl_valid === false ? 'text-red-400' : 'text-gray-500')"
+                x-text="selectedWebsite?.security_result?.ssl_valid === true ? 'Valid' : (selectedWebsite?.security_result?.ssl_valid === false ? 'INVALID' : 'N/A')"></span>
+            </div>
+            <div class="flex justify-between text-gray-400" x-show="selectedWebsite?.security_result?.ssl_expiry_days !== null">
+              <span>SSL Expires</span>
+              <span :class="(selectedWebsite?.security_result?.ssl_expiry_days || 0) < 30 ? 'text-red-400' : 'text-green-400'"
+                x-text="selectedWebsite?.security_result?.ssl_expiry_days !== null ? `${selectedWebsite.security_result.ssl_expiry_days} days` : ''"></span>
+            </div>
+            <div class="flex justify-between text-gray-400" x-show="selectedWebsite?.security_result?.ssl_issuer">
+              <span>SSL Issuer</span>
+              <span class="text-gray-300 text-right max-w-[60%] truncate" x-text="selectedWebsite?.security_result?.ssl_issuer"></span>
+            </div>
+            <!-- Security headers checklist -->
+            <div class="mt-2 pt-2 border-t border-gray-700 space-y-1">
+              <template x-for="[label, key] in [
+                ['HSTS', 'has_hsts'],
+                ['X-Frame-Options', 'has_x_frame_options'],
+                ['Content-Security-Policy', 'has_csp'],
+                ['X-Content-Type-Options', 'has_x_content_type'],
+                ['Referrer-Policy', 'has_referrer_policy'],
+              ]" :key="key">
+                <div class="flex items-center justify-between">
+                  <span class="text-gray-400" x-text="label"></span>
+                  <span :class="selectedWebsite?.security_result?.[key] ? 'text-green-400' : 'text-red-400'">
+                    <svg class="w-3.5 h-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path x-show="selectedWebsite?.security_result?.[key]" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                      <path x-show="!selectedWebsite?.security_result?.[key]" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </span>
+                </div>
+              </template>
+              <div class="flex justify-between text-gray-400">
+                <span>Mixed Content</span>
+                <span :class="selectedWebsite?.security_result?.has_mixed_content ? 'text-red-400' : 'text-green-400'"
+                  x-text="selectedWebsite?.security_result?.has_mixed_content ? 'DETECTED' : 'None'"></span>
+              </div>
+            </div>
+          </div>
+          <!-- Security Issues -->
+          <div x-show="selectedWebsite?.security_result?.issues?.length > 0" class="mt-3">
+            <p class="text-xs font-semibold text-gray-400 mb-1">Issues Found:</p>
+            <ul class="space-y-1">
+              <template x-for="issue in selectedWebsite?.security_result?.issues || []" :key="issue">
+                <li class="flex items-start gap-1.5 text-xs text-red-300">
+                  <svg class="w-3 h-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                  </svg>
+                  <span x-text="issue"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Technology -->
+      <div x-show="selectedWebsite?.tech_result" class="bg-gray-800 rounded-xl p-4">
+        <h3 class="font-semibold text-white mb-3">Technology Stack</h3>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+          <div x-show="selectedWebsite?.tech_result?.server_header">
+            <span class="text-gray-500">Server</span>
+            <p class="text-white font-mono truncate" x-text="selectedWebsite?.tech_result?.server_header"></p>
+          </div>
+          <div x-show="selectedWebsite?.tech_result?.x_powered_by">
+            <span class="text-gray-500">Powered By</span>
+            <p class="text-white font-mono truncate" x-text="selectedWebsite?.tech_result?.x_powered_by"></p>
+          </div>
+          <div x-show="selectedWebsite?.tech_result?.detected_cms">
+            <span class="text-gray-500">CMS</span>
+            <p class="text-white font-mono" x-text="selectedWebsite?.tech_result?.detected_cms"></p>
+          </div>
+          <div x-show="selectedWebsite?.tech_result?.detected_framework">
+            <span class="text-gray-500">Framework</span>
+            <p class="text-white font-mono" x-text="selectedWebsite?.tech_result?.detected_framework"></p>
+          </div>
+          <div x-show="selectedWebsite?.tech_result?.detected_cdn">
+            <span class="text-gray-500">CDN</span>
+            <p class="text-white font-mono" x-text="selectedWebsite?.tech_result?.detected_cdn"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contacts -->
+      <div class="bg-gray-800 rounded-xl p-4">
+        <h3 class="font-semibold text-white mb-3">Contact Information</h3>
+        <div x-show="!selectedWebsite?.contacts?.length" class="text-sm text-gray-500">No contact info found</div>
+        <div class="grid gap-3">
+          <!-- Emails -->
+          <div x-show="selectedWebsite?.contacts?.filter(c => c.type === 'email').length > 0">
+            <p class="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1.5">Emails</p>
+            <div class="flex flex-wrap gap-2">
+              <template x-for="c in (selectedWebsite?.contacts || []).filter(c => c.type === 'email')" :key="c.id">
+                <a :href="`mailto:${c.value}`"
+                  class="flex items-center gap-1.5 px-2.5 py-1 bg-green-900/40 border border-green-800 text-green-300 rounded text-xs hover:bg-green-800/40 transition-colors">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                  </svg>
+                  <span x-text="c.value"></span>
+                </a>
+              </template>
+            </div>
+          </div>
+
+          <!-- Phones -->
+          <div x-show="selectedWebsite?.contacts?.filter(c => c.type === 'phone').length > 0">
+            <p class="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1.5">Phones</p>
+            <div class="flex flex-wrap gap-2">
+              <template x-for="c in (selectedWebsite?.contacts || []).filter(c => c.type === 'phone')" :key="c.id">
+                <a :href="`tel:${c.value}`"
+                  class="flex items-center gap-1.5 px-2.5 py-1 bg-blue-900/40 border border-blue-800 text-blue-300 rounded text-xs hover:bg-blue-800/40 transition-colors">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.948V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/>
+                  </svg>
+                  <span x-text="c.value"></span>
+                </a>
+              </template>
+            </div>
+          </div>
+
+          <!-- Social Links -->
+          <div x-show="selectedWebsite?.contacts?.filter(c => c.type.startsWith('social_')).length > 0">
+            <p class="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1.5">Social Media</p>
+            <div class="flex flex-wrap gap-2">
+              <template x-for="c in (selectedWebsite?.contacts || []).filter(c => c.type.startsWith('social_'))" :key="c.id">
+                <a :href="c.value" target="_blank"
+                  class="flex items-center gap-1.5 px-2.5 py-1 bg-violet-900/40 border border-violet-800 text-violet-300 rounded text-xs hover:bg-violet-800/40 transition-colors">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                  </svg>
+                  <span x-text="c.type.replace('social_', '')"></span>
+                </a>
+              </template>
+            </div>
+          </div>
+
+          <!-- Addresses -->
+          <div x-show="selectedWebsite?.contacts?.filter(c => c.type === 'address').length > 0">
+            <p class="text-xs text-gray-500 uppercase font-semibold tracking-wider mb-1.5">Addresses</p>
+            <div class="space-y-1">
+              <template x-for="c in (selectedWebsite?.contacts || []).filter(c => c.type === 'address')" :key="c.id">
+                <div class="flex items-start gap-1.5 text-xs text-gray-300">
+                  <svg class="w-3 h-3 mt-0.5 flex-shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  </svg>
+                  <span x-text="c.value"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error message if any -->
+      <div x-show="selectedWebsite?.error_message" class="bg-red-900/20 border border-red-800 rounded-xl p-4">
+        <p class="text-xs font-semibold text-red-400 mb-1">Error</p>
+        <p class="text-sm text-red-300" x-text="selectedWebsite?.error_message"></p>
+      </div>
+
+      <!-- Generated Emails -->
+      <div class="bg-gray-800 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-white">AI Cold Emails</h3>
+          <button @click="generateEmail(selectedWebsite)"
+            :disabled="generatingEmail"
+            class="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium transition-colors">
+            <svg x-show="!generatingEmail" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.344.346A3.999 3.999 0 0114 18v1a2 2 0 01-2 2h-0a2 2 0 01-2-2v-1a4 4 0 00-1.172-2.828l-.344-.346z"/>
+            </svg>
+            <svg x-show="generatingEmail" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-text="generatingEmail ? 'Generating...' : 'Generate Email'"></span>
+          </button>
+        </div>
+
+        <!-- Sender config (collapsible) -->
+        <div class="mb-3 p-3 bg-gray-900 rounded-lg border border-gray-700">
+          <p class="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wider">Sender Settings</p>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-gray-400">Your Name / Company</label>
+              <input x-model="emailSender.name" type="text" placeholder="Jan Kowalski"
+                class="w-full mt-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-violet-500">
+            </div>
+            <div>
+              <label class="text-xs text-gray-400">Your Offer</label>
+              <input x-model="emailSender.offer" type="text" placeholder="profesjonalna strona internetowa"
+                class="w-full mt-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-violet-500">
+            </div>
+          </div>
+        </div>
+
+        <!-- Generated emails list -->
+        <div x-show="!siteEmails.length" class="text-sm text-gray-500 text-center py-3">
+          No emails generated yet. Click "Generate Email" to create a personalized cold email.
+        </div>
+        <div class="space-y-3">
+          <template x-for="email in siteEmails" :key="email.id">
+            <div class="border border-gray-700 rounded-lg overflow-hidden">
+              <div class="flex items-center justify-between px-3 py-2 bg-gray-900">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span :class="email.status === 'sent' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-300'"
+                    class="badge flex-shrink-0" x-text="email.status"></span>
+                  <span class="text-xs text-gray-300 font-medium truncate" x-text="email.subject"></span>
+                </div>
+                <div class="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                  <button @click="copyEmail(email)" title="Copy to clipboard"
+                    class="p-1 text-gray-500 hover:text-white transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                    </svg>
+                  </button>
+                  <button @click="markEmailSent(email)" x-show="email.status !== 'sent'" title="Mark as sent"
+                    class="p-1 text-gray-500 hover:text-green-400 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </button>
+                  <button @click="deleteEmail(email)" title="Delete"
+                    class="p-1 text-gray-500 hover:text-red-400 transition-colors">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div x-show="email.recipient_email" class="px-3 pt-2 text-xs text-gray-500">
+                To: <span class="text-green-400" x-text="email.recipient_email"></span>
+              </div>
+              <div class="px-3 py-2">
+                <pre class="text-xs text-gray-300 whitespace-pre-wrap font-sans leading-relaxed" x-text="email.body"></pre>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ BULK EMAIL MODAL -->
+<div x-show="showBulkEmailModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg p-6" @click.stop>
+    <h2 class="text-xl font-bold text-white mb-2">Bulk Email Generation</h2>
+    <p class="text-sm text-gray-400 mb-5">Generuje spersonalizowane cold emaile dla top N stron z emailem, posortowanych po Outdated Score.</p>
+
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Your Name / Company</label>
+        <input x-model="emailSender.name" type="text" placeholder="Jan Kowalski / WebAgency"
+          class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Your Offer (short description)</label>
+        <input x-model="emailSender.offer" type="text" placeholder="profesjonalna strona internetowa + certyfikat SSL"
+          class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">
+          Number of emails: <span class="text-violet-400 font-bold" x-text="bulkEmailCount"></span>
+        </label>
+        <input x-model.number="bulkEmailCount" type="range" min="5" max="100" step="5"
+          class="w-full accent-violet-600">
+        <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+          <span>5</span>
+          <span class="text-yellow-500">~$0.15/email (Claude Opus)</span>
+          <span>100</span>
+        </div>
+      </div>
+    </div>
+
+    <div x-show="bulkEmailStatus" class="mt-4 p-3 bg-violet-900/30 border border-violet-700 rounded-lg text-sm text-violet-300" x-text="bulkEmailStatus"></div>
+
+    <div class="flex gap-3 mt-6">
+      <button @click="showBulkEmailModal = false"
+        class="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors">
+        Cancel
+      </button>
+      <button @click="startBulkGenerate()" :disabled="bulkGenerating"
+        class="flex-1 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-60 text-white rounded-lg text-sm font-medium transition-colors">
+        <span x-show="!bulkGenerating">Start Generating</span>
+        <span x-show="bulkGenerating">Queuing...</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = '';  // Same origin
+
+  function app() {
+    return {
+      currentView: 'dashboard',
+      currentCampaignId: null,
+      currentCampaign: null,
+      campaigns: [],
+      loadingCampaigns: false,
+      websiteList: [],
+      loadingWebsites: false,
+      showNewCampaign: false,
+      creatingCampaign: false,
+      selectedWebsite: null,
+      progress: null,
+      campaignStats: null,
+      globalStats: { total_campaigns: 0, total_websites: 0, total_emails: 0, total_phones: 0 },
+      pollInterval: null,
+      pagination: { total: 0, page: 1, page_size: 25 },
+      filters: {
+        min_outdated: null,
+        max_security: null,
+        cms: '',
+        has_email: '',
+        sort: 'outdated_score',
+        order: 'desc',
+      },
+      newCampaign: { name: '', keyword: '', max_sites: 200, country: 'auto' },
+      // Email generation
+      generatingEmail: false,
+      siteEmails: [],
+      emailSender: { name: '', offer: 'profesjonalna strona internetowa + bezpieczeństwo' },
+      showBulkEmailModal: false,
+      bulkEmailCount: 20,
+      bulkGenerating: false,
+      bulkEmailStatus: '',
+
+      async init() {
+        await this.loadCampaigns();
+        await this.loadGlobalStats();
+      },
+
+      async loadGlobalStats() {
+        try {
+          const r = await fetch(`${API}/api/stats`);
+          if (r.ok) this.globalStats = await r.json();
+        } catch {}
+      },
+
+      async loadCampaigns() {
+        this.loadingCampaigns = true;
+        try {
+          const r = await fetch(`${API}/api/campaigns`);
+          if (r.ok) this.campaigns = await r.json();
+        } catch {}
+        this.loadingCampaigns = false;
+      },
+
+      openNewCampaign() {
+        this.newCampaign = { name: '', keyword: '', max_sites: 50 };
+        this.showNewCampaign = true;
+      },
+
+      async createCampaign() {
+        if (!this.newCampaign.name || !this.newCampaign.keyword) return;
+        this.creatingCampaign = true;
+        try {
+          const r = await fetch(`${API}/api/campaigns`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: this.newCampaign.name,
+              keyword: this.newCampaign.keyword,
+              max_sites: this.newCampaign.max_sites,
+              country: this.newCampaign.country,
+            }),
+          });
+          if (r.ok) {
+            const c = await r.json();
+            this.showNewCampaign = false;
+            this.campaigns.unshift(c);
+            await this.loadGlobalStats();
+            this.openCampaign(c.id);
+          }
+        } catch {}
+        this.creatingCampaign = false;
+      },
+
+      async openCampaign(campaignId) {
+        this.currentCampaignId = campaignId;
+        this.currentView = 'campaign';
+        this.websiteList = [];
+        this.campaignStats = null;
+        this.filters = { min_outdated: null, max_security: null, cms: '', has_email: '', sort: 'outdated_score', order: 'desc' };
+        this.pagination = { total: 0, page: 1, page_size: 25 };
+
+        await Promise.all([
+          this.loadCampaignDetail(),
+          this.loadWebsites(),
+          this.loadCampaignStats(),
+        ]);
+
+        this.startPolling();
+      },
+
+      async loadCampaignDetail() {
+        try {
+          const r = await fetch(`${API}/api/campaigns/${this.currentCampaignId}`);
+          if (r.ok) this.currentCampaign = await r.json();
+        } catch {}
+      },
+
+      async loadWebsites() {
+        if (!this.currentCampaignId) return;
+        this.loadingWebsites = true;
+        try {
+          const params = new URLSearchParams({
+            sort: this.filters.sort,
+            order: this.filters.order,
+            page: this.pagination.page,
+            page_size: this.pagination.page_size,
+          });
+          if (this.filters.min_outdated !== null && this.filters.min_outdated !== '') params.append('min_outdated', this.filters.min_outdated);
+          if (this.filters.max_security !== null && this.filters.max_security !== '') params.append('max_security', this.filters.max_security);
+          if (this.filters.cms) params.append('cms', this.filters.cms);
+          if (this.filters.has_email) params.append('has_email', this.filters.has_email);
+
+          const r = await fetch(`${API}/api/campaigns/${this.currentCampaignId}/websites?${params}`);
+          if (r.ok) {
+            const data = await r.json();
+            this.websiteList = data.websites;
+            this.pagination.total = data.total;
+          }
+        } catch {}
+        this.loadingWebsites = false;
+      },
+
+      async loadCampaignStats() {
+        if (!this.currentCampaignId) return;
+        try {
+          const r = await fetch(`${API}/api/campaigns/${this.currentCampaignId}/stats`);
+          if (r.ok) this.campaignStats = await r.json();
+        } catch {}
+      },
+
+      async pollProgress() {
+        if (!this.currentCampaignId) return;
+        try {
+          const r = await fetch(`${API}/api/campaigns/${this.currentCampaignId}/progress`);
+          if (r.ok) {
+            this.progress = await r.json();
+            // Auto-scroll log to bottom
+            this.$nextTick(() => {
+              const log = document.getElementById('discovery-log');
+              if (log) log.scrollTop = log.scrollHeight;
+            });
+            // Refresh website list and stats while running
+            if (this.progress.status === 'running') {
+              await this.loadWebsites();
+              await this.loadCampaignStats();
+              await this.loadCampaignDetail();
+              await this.loadGlobalStats();
+            } else {
+              // Final refresh
+              await this.loadWebsites();
+              await this.loadCampaignStats();
+              await this.loadCampaignDetail();
+              await this.loadGlobalStats();
+              this.stopPolling();
+            }
+          }
+        } catch {}
+      },
+
+      startPolling() {
+        this.stopPolling();
+        this.pollProgress();
+        this.pollInterval = setInterval(() => this.pollProgress(), 4000);
+      },
+
+      stopPolling() {
+        if (this.pollInterval) {
+          clearInterval(this.pollInterval);
+          this.pollInterval = null;
+        }
+      },
+
+      applyFilters() {
+        this.pagination.page = 1;
+        this.loadWebsites();
+      },
+
+      resetFilters() {
+        this.filters = { min_outdated: null, max_security: null, cms: '', has_email: '', sort: 'outdated_score', order: 'desc' };
+        this.pagination.page = 1;
+        this.loadWebsites();
+      },
+
+      changePage(page) {
+        if (page < 1) return;
+        this.pagination.page = page;
+        this.loadWebsites();
+      },
+
+      async openWebsite(site) {
+        this.siteEmails = [];
+        try {
+          const r = await fetch(`${API}/api/websites/${site.id}`);
+          if (r.ok) this.selectedWebsite = await r.json();
+        } catch {
+          this.selectedWebsite = site;
+        }
+        // Load existing emails
+        try {
+          const r = await fetch(`${API}/api/websites/${site.id}/emails`);
+          if (r.ok) this.siteEmails = await r.json();
+        } catch {}
+      },
+
+      async generateEmail(site) {
+        if (!site || this.generatingEmail) return;
+        this.generatingEmail = true;
+        try {
+          const r = await fetch(`${API}/api/websites/${site.id}/generate-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sender_name: this.emailSender.name || 'Your Name',
+              sender_offer: this.emailSender.offer || 'professional website redesign',
+            }),
+          });
+          if (r.ok) {
+            const email = await r.json();
+            this.siteEmails.unshift(email);
+          } else {
+            const err = await r.json();
+            alert('Email generation failed: ' + (err.detail || 'Unknown error'));
+          }
+        } catch (e) {
+          alert('Error: ' + e.message);
+        }
+        this.generatingEmail = false;
+      },
+
+      async copyEmail(email) {
+        const text = `Subject: ${email.subject}\n\n${email.body}`;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          // Fallback
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+      },
+
+      async markEmailSent(email) {
+        try {
+          await fetch(`${API}/api/emails/${email.id}/status?status=sent`, { method: 'PATCH' });
+          email.status = 'sent';
+        } catch {}
+      },
+
+      async deleteEmail(email) {
+        try {
+          await fetch(`${API}/api/emails/${email.id}`, { method: 'DELETE' });
+          this.siteEmails = this.siteEmails.filter(e => e.id !== email.id);
+        } catch {}
+      },
+
+      async startBulkGenerate() {
+        if (this.bulkGenerating) return;
+        this.bulkGenerating = true;
+        this.bulkEmailStatus = '';
+        try {
+          const r = await fetch(
+            `${API}/api/campaigns/${this.currentCampaignId}/generate-emails-bulk?limit=${this.bulkEmailCount}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sender_name: this.emailSender.name || 'Your Name',
+                sender_offer: this.emailSender.offer || 'professional website redesign',
+              }),
+            }
+          );
+          if (r.ok) {
+            const data = await r.json();
+            this.bulkEmailStatus = `✓ Queued ${data.queued} emails for generation. This runs in background — open individual sites to see results.`;
+          } else {
+            this.bulkEmailStatus = 'Failed to queue emails.';
+          }
+        } catch (e) {
+          this.bulkEmailStatus = 'Error: ' + e.message;
+        }
+        this.bulkGenerating = false;
+      },
+
+      exportCsv() {
+        window.open(`${API}/api/campaigns/${this.currentCampaignId}/export/csv`, '_blank');
+      },
+
+      async deleteCampaign(id) {
+        if (!confirm('Delete this campaign and all its data?')) return;
+        try {
+          await fetch(`${API}/api/campaigns/${id}`, { method: 'DELETE' });
+          this.campaigns = this.campaigns.filter(c => c.id !== id);
+          await this.loadGlobalStats();
+        } catch {}
+      },
+
+      // Score helpers
+      getOutdatedColor(score) {
+        if (score >= 70) return 'text-red-400';
+        if (score >= 45) return 'text-orange-400';
+        if (score >= 20) return 'text-yellow-400';
+        return 'text-green-400';
+      },
+      getOutdatedHex(score) {
+        if (score >= 70) return '#f87171';
+        if (score >= 45) return '#fb923c';
+        if (score >= 20) return '#facc15';
+        return '#4ade80';
+      },
+      getOutdatedLabel(score) {
+        if (score >= 80) return 'Critical';
+        if (score >= 60) return 'Significantly Outdated';
+        if (score >= 40) return 'Moderately Outdated';
+        if (score >= 20) return 'Slightly Outdated';
+        return 'Modern';
+      },
+      getSecurityColor(score) {
+        if (score >= 75) return 'text-green-400';
+        if (score >= 50) return 'text-yellow-400';
+        if (score >= 30) return 'text-orange-400';
+        return 'text-red-400';
+      },
+      getSecurityHex(score) {
+        if (score >= 75) return '#4ade80';
+        if (score >= 50) return '#facc15';
+        if (score >= 30) return '#fb923c';
+        return '#f87171';
+      },
+      getSecurityLabel(score) {
+        if (score >= 80) return 'Secure';
+        if (score >= 60) return 'Mostly Secure';
+        if (score >= 40) return 'Moderate Risk';
+        if (score >= 20) return 'High Risk';
+        return 'Critical Risk';
+      },
+    };
+  }
+</script>
+</body>
+</html>

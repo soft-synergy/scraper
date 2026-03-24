@@ -1,0 +1,22 @@
+# Environment
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Claude
+.claude/
+
+# OS
+.DS_Store
