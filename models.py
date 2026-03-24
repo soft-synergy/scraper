@@ -14,7 +14,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     name = Column(String, nullable=True)
-    plan = Column(String, default="free")  # free|starter|pro
+    plan = Column(String, default="pro")  # free|starter|pro
     stripe_customer_id = Column(String, nullable=True)
     stripe_subscription_id = Column(String, nullable=True)
     subscription_period_end = Column(DateTime, nullable=True)

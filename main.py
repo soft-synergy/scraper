@@ -294,7 +294,7 @@ async def register(body: RegisterRequest, db: Session = Depends(get_db)):
         email=body.email.lower().strip(),
         hashed_password=hash_password(body.password),
         name=body.name,
-        plan="free",
+        plan="pro",
     )
     db.add(user)
     db.commit()
