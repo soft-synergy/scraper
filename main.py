@@ -303,6 +303,16 @@ async def app_page():
         return f.read()
 
 
+@app.get("/manifest.json")
+async def manifest():
+    return FileResponse("static/manifest.json", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse("static/sw.js", media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
+
+
 @app.get("/onboarding", response_class=HTMLResponse)
 async def onboarding_page():
     with open("static/onboarding.html") as f:
