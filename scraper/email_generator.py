@@ -18,7 +18,7 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "xiaomi/mimo-v2-omni"
 
-SENDER_NAME = "Antoni Seba"
+SENDER_NAME = "Piotr Serczynski"
 SENDER_TITLE = "specjalista ds. bezpieczeństwa stron internetowych"
 BOOKING_LINK = "https://cal.com/soft-synergy/30min"
 

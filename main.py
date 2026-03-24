@@ -545,6 +545,7 @@ async def list_websites(
     min_security: Optional[int] = None,
     max_security: Optional[int] = None,
     cms: Optional[str] = None,
+    search: Optional[str] = None,
     sort: str = "outdated_score",
     order: str = "desc",
     page: int = 1,
@@ -573,6 +574,18 @@ async def list_websites(
             query = query.join(models.OutdatedResult).filter(models.OutdatedResult.cms_name.is_(None))
         else:
             query = query.join(models.OutdatedResult).filter(models.OutdatedResult.cms_name.ilike(f"%{cms}%"))
+    if search:
+        s = f"%{search}%"
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                models.Website.domain.ilike(s),
+                models.Website.url.ilike(s),
+                models.Website.id.in_(
+                    db.query(models.ContactInfo.website_id).filter(models.ContactInfo.value.ilike(s))
+                )
+            )
+        )
 
     sort_col = {
         "security_score": models.Website.security_score,
@@ -853,6 +866,179 @@ async def delete_email(
     db.delete(email)
     db.commit()
     return {"ok": True}
+
+
+@app.delete("/api/emails/{email_id}/recipient")
+async def remove_email_recipient(
+    email_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    email = db.query(models.GeneratedEmail).filter(models.GeneratedEmail.id == email_id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Not found")
+    email.recipient_email = None
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/admin/email-logs")
+async def get_email_logs(
+    page: int = 1,
+    page_size: int = 50,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """All sent emails — main + follow-ups."""
+    sent_main = db.query(models.GeneratedEmail).join(
+        models.Website, models.GeneratedEmail.website_id == models.Website.id
+    ).join(
+        models.Campaign, models.Website.campaign_id == models.Campaign.id
+    ).filter(
+        models.Campaign.user_id == current_user.id,
+        models.GeneratedEmail.status == "sent",
+    ).order_by(models.GeneratedEmail.generated_at.desc()).all()
+
+    sent_followups = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail, models.ScheduledFollowup.email_id == models.GeneratedEmail.id
+    ).join(
+        models.Website, models.GeneratedEmail.website_id == models.Website.id
+    ).join(
+        models.Campaign, models.Website.campaign_id == models.Campaign.id
+    ).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status.in_(["sent", "failed"]),
+    ).order_by(models.ScheduledFollowup.sent_at.desc().nulls_last()).all()
+
+    main_logs = [
+        {
+            "type": "main",
+            "email_id": e.id,
+            "recipient": e.recipient_email,
+            "subject": e.subject,
+            "status": e.status,
+            "sent_at": e.generated_at.isoformat() if e.generated_at else None,
+            "website_id": e.website_id,
+        }
+        for e in sent_main
+    ]
+    followup_logs = [
+        {
+            "type": f"followup_{f.follow_up_number}",
+            "email_id": f.email_id,
+            "recipient": f.recipient,
+            "subject": f.subject,
+            "status": f.status,
+            "sent_at": f.sent_at.isoformat() if f.sent_at else None,
+            "error": f.error,
+            "website_id": None,
+        }
+        for f in sent_followups
+    ]
+
+    all_logs = sorted(main_logs + followup_logs, key=lambda x: x["sent_at"] or "", reverse=True)
+    total = len(all_logs)
+    start = (page - 1) * page_size
+    return {"total": total, "page": page, "page_size": page_size, "logs": all_logs[start:start + page_size]}
+
+
+@app.get("/api/admin/scheduler")
+async def get_scheduler_status(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Scheduler health stats."""
+    now = datetime.utcnow()
+    pending = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "pending",
+    ).count()
+
+    overdue = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "pending",
+        models.ScheduledFollowup.send_at <= now,
+    ).count()
+
+    sent_total = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "sent",
+    ).count()
+
+    failed_total = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "failed",
+    ).count()
+
+    last_sent = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "sent",
+    ).order_by(models.ScheduledFollowup.sent_at.desc()).first()
+
+    next_due = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "pending",
+        models.ScheduledFollowup.send_at > now,
+    ).order_by(models.ScheduledFollowup.send_at.asc()).first()
+
+    return {
+        "pending_count": pending,
+        "overdue_count": overdue,
+        "sent_total": sent_total,
+        "failed_total": failed_total,
+        "last_sent_at": last_sent.sent_at.isoformat() if last_sent and last_sent.sent_at else None,
+        "last_sent_to": last_sent.recipient if last_sent else None,
+        "next_due_at": next_due.send_at.isoformat() if next_due else None,
+        "next_due_to": next_due.recipient if next_due else None,
+        "scheduler_interval_minutes": 5,
+    }
+
+
+@app.get("/api/admin/scheduled-emails")
+async def get_scheduled_emails(
+    page: int = 1,
+    page_size: int = 50,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """All pending future follow-ups."""
+    query = db.query(models.ScheduledFollowup).join(
+        models.GeneratedEmail
+    ).join(models.Website).join(models.Campaign).filter(
+        models.Campaign.user_id == current_user.id,
+        models.ScheduledFollowup.status == "pending",
+    ).order_by(models.ScheduledFollowup.send_at.asc())
+
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [
+            {
+                "id": f.id,
+                "follow_up_number": f.follow_up_number,
+                "send_at": f.send_at.isoformat(),
+                "recipient": f.recipient,
+                "subject": f.subject,
+                "status": f.status,
+            }
+            for f in items
+        ],
+    }
 
 
 class FollowupOut(BaseModel):
