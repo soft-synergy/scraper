@@ -60,6 +60,8 @@ class Website(Base):
     url = Column(String, nullable=False)
     domain = Column(String, nullable=False)
     title = Column(String, nullable=True)
+    page_description = Column(Text, nullable=True)
+    page_headings = Column(Text, nullable=True)  # JSON array of h1/h2 texts
     status = Column(String, default="pending")  # pending|analyzing|done|error
     error_message = Column(Text, nullable=True)
 

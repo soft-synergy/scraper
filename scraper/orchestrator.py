@@ -73,6 +73,20 @@ async def _analyze_website(website_id: int, semaphore: asyncio.Semaphore):
                     if title_tag:
                         site.title = title_tag.get_text(strip=True)[:500]
 
+                    # Extract meta description
+                    meta_desc = soup.find("meta", {"name": re.compile(r"^description$", re.I)})
+                    if meta_desc:
+                        site.page_description = (meta_desc.get("content") or "")[:500]
+
+                    # Extract H1/H2 headings for business context
+                    headings = []
+                    for tag in soup.find_all(["h1", "h2"])[:6]:
+                        text = tag.get_text(strip=True)[:120]
+                        if text:
+                            headings.append(text)
+                    if headings:
+                        site.page_headings = json.dumps(headings, ensure_ascii=False)
+
                     # Run all checks concurrently
                     outdated_data, security_data, tech_data, contacts = await asyncio.gather(
                         check_outdated(soup, headers, html),

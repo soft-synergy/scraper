@@ -47,6 +47,36 @@ def _detect_language(keyword: str, country: str, domain: str = "") -> str:
     return "pl"
 
 
+def _build_page_context(site_data: dict) -> str:
+    """Build a human-readable summary of what the page is about."""
+    parts = []
+    title = site_data.get("title")
+    desc = site_data.get("page_description")
+    headings_raw = site_data.get("page_headings")
+    tech = site_data.get("tech_result") or {}
+
+    if title:
+        parts.append(f"Tytuł strony: {title}")
+    if desc:
+        parts.append(f"Opis (meta): {desc}")
+    if headings_raw:
+        try:
+            import json as _json
+            headings = _json.loads(headings_raw)
+            if headings:
+                parts.append("Nagłówki H1/H2: " + " | ".join(headings))
+        except Exception:
+            pass
+    cms = tech.get("detected_cms") or tech.get("detected_framework")
+    if cms:
+        parts.append(f"Technologia: {cms}")
+    cdn = tech.get("detected_cdn")
+    if cdn:
+        parts.append(f"CDN: {cdn}")
+
+    return "\n".join(parts) if parts else ""
+
+
 def _build_audit_summary(site_data: dict) -> dict:
     outdated = site_data.get("outdated_result") or {}
     security = site_data.get("security_result") or {}
@@ -149,13 +179,15 @@ def _findings_text(findings: list, lang_key: str, limit: int = 4) -> str:
     )
 
 
-def _build_main_prompt(audit: dict, keyword: str, language: str, sender_offer: str) -> str:
+def _build_main_prompt(audit: dict, keyword: str, language: str, sender_offer: str, page_context: str = "") -> str:
     domain = audit["domain"] or "strona"
     findings = _findings_text(audit["findings"], "pl")
     opt_out = OPT_OUT["pl"]
     top_issue = audit["findings"][0]["pl"] if audit["findings"] else "kilka kwestii technicznych"
+    page_ctx_section = f"\nKONTEKST STRONY (co wiemy o tym biznesie):\n{page_context}\n" if page_context else ""
 
     return f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Piszesz cold email do właściciela strony {domain} (branża: {keyword}).
+{page_ctx_section}
 
 WYNIKI AUDYTU:
 {findings}
@@ -353,9 +385,10 @@ async def generate_email(
     domain = site_data.get("domain", "")
     language = _detect_language(keyword, country, domain)
     audit = _build_audit_summary(site_data)
+    page_context = _build_page_context(site_data)
 
     # Generate main email
-    main_prompt = _build_main_prompt(audit, keyword, language, sender_offer)
+    main_prompt = _build_main_prompt(audit, keyword, language, sender_offer, page_context)
     result = await _call_llm(main_prompt)
     result = _ensure_footer(result, language)
     result["language"] = language
