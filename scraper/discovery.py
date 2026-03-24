@@ -2,19 +2,21 @@
 Massive-scale website discovery.
 Strategy for tens of thousands of sites:
   1. OSM Overpass API - free, returns ALL businesses in a country with website URLs
-  2. Search engines (DDG + Bing) with ALL cities in the target country
-  3. Polish directories: panoramafirm.pl, aleo.com, firmy.net
+  2. DDGS (DuckDuckGo Search library) with ALL cities in the target country
+  3. Google search via DDGS with city+niche queries
   4. US: Yellow Pages with top 100 cities
 """
 import asyncio
 import json
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs, unquote, urljoin
 from typing import List, Dict, Optional
 
 import httpx
 from bs4 import BeautifulSoup
+from ddgs import DDGS
 
 BLOCKED_DOMAINS = {
     "yelp.com", "yellowpages.com", "facebook.com", "instagram.com",
@@ -58,6 +60,16 @@ OSM_TAG_MAP = {
     "kwiaciarnia": [("shop", "florist")],
     "piekarnia": [("shop", "bakery")],
     "fizjoterapeuta": [("healthcare", "physiotherapist")],
+    "trener": [("leisure", "fitness_centre"), ("leisure", "sports_centre")],
+    "trener personalny": [("leisure", "fitness_centre"), ("leisure", "sports_centre")],
+    "fitness": [("leisure", "fitness_centre")],
+    "silownia": [("leisure", "fitness_centre")],
+    "siłownia": [("leisure", "fitness_centre")],
+    "pilates": [("leisure", "fitness_centre"), ("leisure", "sports_centre")],
+    "joga": [("leisure", "fitness_centre"), ("leisure", "sports_centre")],
+    "yoga": [("leisure", "fitness_centre"), ("leisure", "sports_centre")],
+    "rehabilitacja": [("healthcare", "physiotherapist"), ("leisure", "fitness_centre")],
+    "dietetyk": [("healthcare", "nutrition_counseling")],
     "dentist": [("amenity", "dentist")],
     "mechanic": [("shop", "car_repair")],
     "lawyer": [("office", "lawyer")],
@@ -200,6 +212,16 @@ def _detect_country(keyword: str) -> str:
         "fryzjer", "kosmetyczk", "restauracj", "apteka", "piekarni",
         "cukierni", "kwiaciarni", "weterynarz", "optyk", "ubezpiecze",
         "fizjoterap", "gabinet",
+        # sport / zdrowie / uroda
+        "trener", "personaln", "fitness", "silowni", "siłowni", "pilates",
+        "joga", "yoga", "dietetyk", "psycholog", "terapeut", "logoped",
+        "masazysta", "masażyst", "masaz", "masaż", "rehabilit",
+        # usługi / finanse / kreatywne
+        "ksiegow", "księgow", "ksiegow", "rachunkow", "architekt", "fotograf",
+        "budownict", "deweloper", "przeprowadzk", "sprzatani", "sprzątani",
+        "ogrodnik", "ochrona", "detektyw", "tlumacz", "tłumacz",
+        # edukacja
+        "korepetyc", "nauczyci", "szkol", "kurs", "przedszkol",
     }
     kw_lower = keyword.lower()
     for word in polish_roots:
@@ -216,17 +238,28 @@ def _get_osm_tags(keyword: str) -> list:
     return []
 
 
-async def _query_osm_overpass(client, tag_key, tag_value, bbox):
+async def _query_osm_overpass(client, tag_key, tag_value, bbox, country_iso=""):
     urls = []
-    min_lat, min_lon, max_lat, max_lon = bbox
-    bbox_str = f"{min_lat},{min_lon},{max_lat},{max_lon}"
-    query = f'[out:json][timeout:90];(node["{tag_key}"="{tag_value}"]({bbox_str});way["{tag_key}"="{tag_value}"]({bbox_str});relation["{tag_key}"="{tag_value}"]({bbox_str}););out body;'
+    if country_iso:
+        # Use area filter to stay within country boundaries
+        query = (
+            f'[out:json][timeout:120];'
+            f'area["ISO3166-1"="{country_iso.upper()}"][admin_level=2]->.country;'
+            f'('
+            f'node["{tag_key}"="{tag_value}"](area.country);'
+            f'way["{tag_key}"="{tag_value}"](area.country);'
+            f');out body;'
+        )
+    else:
+        min_lat, min_lon, max_lat, max_lon = bbox
+        bbox_str = f"{min_lat},{min_lon},{max_lat},{max_lon}"
+        query = f'[out:json][timeout:90];(node["{tag_key}"="{tag_value}"]({bbox_str});way["{tag_key}"="{tag_value}"]({bbox_str});relation["{tag_key}"="{tag_value}"]({bbox_str}););out body;'
     try:
         resp = await client.post(
             "https://overpass-api.de/api/interpreter",
             data={"data": query},
             headers={"User-Agent": "NicheWebsiteScraper/1.0 (educational tool)"},
-            timeout=httpx.Timeout(120.0),
+            timeout=httpx.Timeout(150.0),
         )
         if resp.status_code != 200:
             return urls
@@ -247,79 +280,28 @@ async def _query_osm_overpass(client, tag_key, tag_value, bbox):
     return urls
 
 
-async def _search_duckduckgo(client, query, page=0, country="us"):
-    urls = []
-    try:
-        kl = "pl-pl" if country == "pl" else "wt-wt"
-        data = {"q": query, "kl": kl}
-        if page > 0:
-            data["s"] = str(page * 30)
-            data["dc"] = str(page * 30 + 1)
-            data["nextParams"] = ""
-            data["v"] = "l"
-            data["o"] = "json"
-        resp = await client.post(
-            "https://html.duckduckgo.com/html/",
-            data=data,
-            headers={
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8" if country == "pl" else "en-US,en;q=0.9",
-                "Origin": "https://html.duckduckgo.com",
-                "Referer": "https://html.duckduckgo.com/",
-            },
-            timeout=12.0
-        )
-        if resp.status_code != 200:
-            return urls
-        soup = BeautifulSoup(resp.text, "lxml")
-        for a in soup.find_all("a", class_="result__a"):
-            href = a.get("href", "")
-            if "uddg=" in href:
-                try:
-                    if href.startswith("//"):
-                        href = "https:" + href
-                    real_url = parse_qs(urlparse(href).query).get("uddg", [None])[0]
-                    if real_url:
-                        urls.append(unquote(real_url))
-                except Exception:
-                    pass
-            elif href.startswith("http"):
-                urls.append(href)
-    except Exception:
-        pass
-    return urls
+_ddgs_executor = ThreadPoolExecutor(max_workers=8)
 
 
-async def _search_bing(client, query, page=0, country="us"):
-    urls = []
-    try:
-        mkt = "pl-PL" if country == "pl" else "en-US"
-        params = {"q": query, "count": "50", "mkt": mkt}
-        if page > 0:
-            params["first"] = str(page * 10 + 1)
-        resp = await client.get(
-            "https://www.bing.com/search",
-            params=params,
-            headers={
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "pl-PL,pl;q=0.9" if country == "pl" else "en-US,en;q=0.9",
-            },
-            timeout=12.0
-        )
-        if resp.status_code != 200:
-            return urls
-        soup = BeautifulSoup(resp.text, "lxml")
-        for li in soup.find_all("li", class_="b_algo"):
-            h2 = li.find("h2")
-            if h2:
-                a = h2.find("a")
-                if a and a.get("href", "").startswith("http"):
-                    urls.append(a["href"])
-    except Exception:
-        pass
-    return urls
+async def _search_ddgs(query: str, country: str = "us", max_results: int = 15) -> list:
+    """Search via DDGS library (runs sync code in thread pool, retries once on failure)."""
+    region = "pl-pl" if country == "pl" else "wt-wt"
+
+    def _sync():
+        import time as _time
+        for attempt in range(2):
+            try:
+                if attempt > 0:
+                    _time.sleep(2)
+                with DDGS() as ddgs:
+                    results = ddgs.text(query, max_results=max_results, region=region)
+                    return [r["href"] for r in results]
+            except Exception:
+                pass  # retry only on exception (network error), not empty results
+        return []
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_ddgs_executor, _sync)
 
 
 async def _scrape_panoramafirm(client, keyword, city, page=1):
@@ -455,9 +437,10 @@ async def discover_websites(
                     await asyncio.sleep(10)
                     await log(f"[1/3] OSM: pobieram dane... {i*10}s")
 
+            country_iso = country if country in ("pl", "us") else ""
             hb_task = asyncio.create_task(osm_heartbeat())
             osm_results = await asyncio.gather(
-                *[_query_osm_overpass(client, k, v, bbox) for k, v in osm_tags],
+                *[_query_osm_overpass(client, k, v, bbox, country_iso) for k, v in osm_tags],
                 return_exceptions=True
             )
             hb_task.cancel()
@@ -466,6 +449,20 @@ async def discover_websites(
                 if isinstance(r, list):
                     _add_urls(seen, r, max_results)
             osm_found = len(seen) - before
+            # Retry OSM once if returned 0 (transient API issue)
+            if osm_found == 0:
+                await log(f"[1/3] OSM: 0 wyników — retry za 10s...")
+                await asyncio.sleep(10)
+                hb_task2 = asyncio.create_task(osm_heartbeat())
+                osm_results2 = await asyncio.gather(
+                    *[_query_osm_overpass(client, k, v, bbox, country_iso) for k, v in osm_tags],
+                    return_exceptions=True
+                )
+                hb_task2.cancel()
+                for r in osm_results2:
+                    if isinstance(r, list):
+                        _add_urls(seen, r, max_results)
+                osm_found = len(seen) - before
             await log(f"[1/3] OSM: znaleziono {osm_found} nowych stron ({len(seen)} łącznie)")
         else:
             await log(f"[1/3] OSM: brak mapowania tagów dla '{keyword}', pomijam")
@@ -474,92 +471,77 @@ async def discover_websites(
             await log(f"Osiągnięto limit {max_results} stron — kończę discovery")
             return list(seen.values())
 
-        # SOURCE 2: Search engines with ALL cities
+        # SOURCE 2: DDGS search - top 50 cities to keep it fast
+        top_cities = cities[:50]
         all_queries = [keyword]
-        for city in cities:
+        for city in top_cities:
             all_queries.append(f"{keyword} {city}")
-        if country == "pl":
-            for city in cities[:50]:
-                all_queries.append(f"gabinet {keyword} {city}")
 
-        total_search_tasks_count = len(all_queries) * 5  # ~5 requests per query
-        await log(f"[2/3] Wyszukiwarki — {len(all_queries)} zapytań × 3 strony (DDG + Bing)...")
+        await log(f"[2/3] DDGS — {len(all_queries)} zapytań × 15 wyników każde...")
         search_sem = asyncio.Semaphore(6)
-        pages_per_query = 3
 
-        async def do_search(engine, query, page):
+        async def do_search(query):
             async with search_sem:
-                await asyncio.sleep(random.uniform(0.2, 0.5))
-                if engine == "ddg":
-                    return await _search_duckduckgo(client, query, page, country)
-                else:
-                    return await _search_bing(client, query, page, country)
-
-        search_tasks = []
-        for query in all_queries:
-            for page in range(pages_per_query):
-                search_tasks.append(("ddg", query, page))
-                if page < 2:
-                    search_tasks.append(("bing", query, page))
+                await asyncio.sleep(random.uniform(0.1, 0.4))
+                return await _search_ddgs(query, country, max_results=15)
 
         batch_size = 40
-        total_batches = (len(search_tasks) + batch_size - 1) // batch_size
-        for i in range(0, len(search_tasks), batch_size):
+        total_batches = (len(all_queries) + batch_size - 1) // batch_size
+        for i in range(0, len(all_queries), batch_size):
             if len(seen) >= max_results:
                 break
-            batch = search_tasks[i:i + batch_size]
+            batch = all_queries[i:i + batch_size]
             results = await asyncio.gather(
-                *[do_search(e, q, p) for e, q, p in batch],
+                *[do_search(q) for q in batch],
                 return_exceptions=True
             )
             for r in results:
                 if isinstance(r, list):
                     _add_urls(seen, r, max_results)
             batch_num = i // batch_size + 1
-            if batch_num % 5 == 0 or batch_num == total_batches:
+            if batch_num % 3 == 0 or batch_num == total_batches:
                 pct = round(batch_num / total_batches * 100)
-                await log(f"[2/3] Wyszukiwarki {pct}% — partia {batch_num}/{total_batches} — {len(seen)} stron znalezionych")
+                await log(f"[2/3] DDGS {pct}% — partia {batch_num}/{total_batches} — {len(seen)} stron znalezionych")
 
-        await log(f"[2/3] Wyszukiwarki gotowe: {len(seen)} unikalnych domen")
+        await log(f"[2/3] DDGS gotowe: {len(seen)} unikalnych domen")
 
-        # SOURCE 3: Business Directories
+        # SOURCE 3: Extended queries (remaining cities + variant phrases)
         if len(seen) < max_results:
-            dir_sem = asyncio.Semaphore(5)
-
             if country == "pl":
-                await log(f"[3/3] Katalogi biznesowe PL — Panorama Firm + Aleo ({len(POLISH_CITIES)} miast × 3 strony)...")
-                dir_tasks = []
-                for city in POLISH_CITIES:
-                    for page in range(1, 4):
-                        dir_tasks.append(("panorama", city, page))
-                        dir_tasks.append(("aleo", city, page))
+                # Additional queries: cities 50-120 + variant phrases for top 30
+                extra_queries = []
+                for city in cities[50:120]:
+                    extra_queries.append(f"{keyword} {city}")
+                for city in cities[:30]:
+                    extra_queries.append(f"{keyword} cennik {city}")
 
-                async def do_dir(source, city, page):
-                    async with dir_sem:
-                        await asyncio.sleep(random.uniform(0.3, 0.7))
-                        if source == "panorama":
-                            return await _scrape_panoramafirm(client, keyword, city, page)
-                        else:
-                            return await _scrape_aleo(client, keyword, city, page)
+                await log(f"[3/3] DDGS dodatkowe frazy — {len(extra_queries)} zapytań...")
+                extra_sem = asyncio.Semaphore(6)
 
-                total_dir_batches = (len(dir_tasks) + 49) // 50
-                for i in range(0, len(dir_tasks), 50):
+                async def do_extra(query):
+                    async with extra_sem:
+                        await asyncio.sleep(random.uniform(0.1, 0.4))
+                        return await _search_ddgs(query, country, max_results=15)
+
+                batch_size_extra = 20
+                total_extra_batches = (len(extra_queries) + batch_size_extra - 1) // batch_size_extra
+                for i in range(0, len(extra_queries), batch_size_extra):
                     if len(seen) >= max_results:
                         break
-                    batch = dir_tasks[i:i + 50]
+                    batch = extra_queries[i:i + batch_size_extra]
                     results = await asyncio.gather(
-                        *[do_dir(s, c, p) for s, c, p in batch],
+                        *[do_extra(q) for q in batch],
                         return_exceptions=True
                     )
                     for r in results:
                         if isinstance(r, list):
                             _add_urls(seen, r, max_results)
-                    batch_num = i // 50 + 1
-                    if batch_num % 10 == 0 or batch_num == total_dir_batches:
-                        pct = round(batch_num / total_dir_batches * 100)
-                        await log(f"[3/3] Katalogi PL {pct}% — {len(seen)} stron znalezionych")
+                    batch_num = i // batch_size_extra + 1
+                    if batch_num % 5 == 0 or batch_num == total_extra_batches:
+                        pct = round(batch_num / total_extra_batches * 100)
+                        await log(f"[3/3] DDGS dodatkowe {pct}% — {len(seen)} stron znalezionych")
 
-                await log(f"[3/3] Katalogi PL gotowe: {len(seen)} unikalnych domen")
+                await log(f"[3/3] DDGS dodatkowe gotowe: {len(seen)} unikalnych domen")
 
             elif country == "us":
                 await log(f"[3/3] Yellow Pages USA — {len(US_CITIES)} miast × 3 strony...")

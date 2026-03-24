@@ -156,6 +156,26 @@ class GeneratedEmail(Base):
     language = Column(String, default="pl")  # pl|en
     recipient_email = Column(String, nullable=True)
     status = Column(String, default="draft")  # draft|sent
+    follow_ups = Column(Text, nullable=True)  # JSON array of follow-up emails
     generated_at = Column(DateTime, default=datetime.utcnow)
 
     website = relationship("Website", backref="generated_emails")
+    scheduled_followups = relationship("ScheduledFollowup", back_populates="email", cascade="all, delete-orphan")
+
+
+class ScheduledFollowup(Base):
+    __tablename__ = "scheduled_followups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_id = Column(Integer, ForeignKey("generated_emails.id"), nullable=False)
+    follow_up_number = Column(Integer, nullable=False)   # 1-4
+    send_on_day = Column(Integer, nullable=False)         # 3, 7, 14, 21
+    send_at = Column(DateTime, nullable=False)            # absolute datetime
+    recipient = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    status = Column(String, default="pending")            # pending|sent|failed
+    sent_at = Column(DateTime, nullable=True)
+    error = Column(Text, nullable=True)
+
+    email = relationship("GeneratedEmail", back_populates="scheduled_followups")

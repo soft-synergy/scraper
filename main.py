@@ -17,7 +17,7 @@ from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session, joinedload
 
 from database import engine, get_db, Base, SQLALCHEMY_DATABASE_URL, SessionLocal
@@ -27,6 +27,7 @@ from limits import check_campaign_limit, check_email_limit, check_feature, get_m
 from stripe_client import PLANS, get_plan, create_checkout_session, create_portal_session, handle_webhook_event
 from scraper.orchestrator import run_campaign
 from scraper.email_generator import generate_email
+from scraper.mailer import send_email
 
 
 # ─── DB Init + Migrations ─────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     for sql in [
         "ALTER TABLE campaigns ADD COLUMN discovery_log TEXT",
         "ALTER TABLE campaigns ADD COLUMN user_id INTEGER",
+        "ALTER TABLE generated_emails ADD COLUMN follow_ups TEXT",
     ]:
         try:
             con.execute(sql)
@@ -50,7 +52,11 @@ async def lifespan(app: FastAPI):
     con.execute("UPDATE campaigns SET status='failed' WHERE status IN ('running', 'discovering')")
     con.commit()
     con.close()
+
+    # Start follow-up scheduler background loop
+    scheduler_task = asyncio.create_task(_followup_scheduler())
     yield
+    scheduler_task.cancel()
 
 
 app = FastAPI(title="WebLeadScraper", lifespan=lifespan)
@@ -200,10 +206,22 @@ class EmailOut(BaseModel):
     language: str
     recipient_email: Optional[str]
     status: str
+    follow_ups: Optional[list] = None
     generated_at: datetime
 
     class Config:
         from_attributes = True
+
+    @field_validator("follow_ups", mode="before")
+    @classmethod
+    def parse_follow_ups(cls, v):
+        import json as _json
+        if isinstance(v, str):
+            try:
+                return _json.loads(v)
+            except Exception:
+                return []
+        return v or []
 
 
 class CheckoutRequest(BaseModel):
@@ -782,7 +800,9 @@ async def generate_website_email(
             raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY nie jest ustawiony.")
         raise HTTPException(status_code=500, detail=f"Generowanie emaila nieudane: {err}")
 
-    email_record = models.GeneratedEmail(website_id=website_id, subject=result.get("subject", ""), body=result.get("body", ""), language=result.get("language", "pl"), recipient_email=result.get("recipient_email"), status="draft")
+    import json as _json
+    follow_ups_json = _json.dumps(result.get("follow_ups", []), ensure_ascii=False)
+    email_record = models.GeneratedEmail(website_id=website_id, subject=result.get("subject", ""), body=result.get("body", ""), language=result.get("language", "pl"), recipient_email=result.get("recipient_email"), status="draft", follow_ups=follow_ups_json)
     db.add(email_record)
     db.commit()
     db.refresh(email_record)
@@ -828,6 +848,125 @@ async def delete_email(
     db.delete(email)
     db.commit()
     return {"ok": True}
+
+
+class FollowupOut(BaseModel):
+    id: int
+    follow_up_number: int
+    send_on_day: int
+    send_at: datetime
+    recipient: str
+    subject: str
+    status: str
+    sent_at: Optional[datetime]
+    error: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+@app.post("/api/emails/{email_id}/send")
+async def send_email_now(
+    email_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Send the main email immediately and schedule all follow-ups."""
+    email = db.query(models.GeneratedEmail).filter(models.GeneratedEmail.id == email_id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not email.recipient_email:
+        raise HTTPException(status_code=400, detail="Brak adresu email odbiorcy")
+
+    # Send main email
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, send_email, email.recipient_email, email.subject, email.body
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Błąd wysyłki: {exc}")
+
+    email.status = "sent"
+
+    # Schedule follow-ups (skip if already scheduled)
+    existing = db.query(models.ScheduledFollowup).filter(models.ScheduledFollowup.email_id == email_id).count()
+    if existing == 0 and email.follow_ups:
+        follow_ups = _json.loads(email.follow_ups) if isinstance(email.follow_ups, str) else (email.follow_ups or [])
+        now = datetime.utcnow()
+        for fu in follow_ups:
+            day = fu.get("send_on_day", 3)
+            send_at = now.replace(hour=9, minute=0, second=0, microsecond=0)
+            from datetime import timedelta
+            send_at = send_at + timedelta(days=day)
+            record = models.ScheduledFollowup(
+                email_id=email_id,
+                follow_up_number=fu.get("follow_up_number", 1),
+                send_on_day=day,
+                send_at=send_at,
+                recipient=email.recipient_email,
+                subject=fu.get("subject", ""),
+                body=fu.get("body", ""),
+                status="pending",
+            )
+            db.add(record)
+
+    db.commit()
+    followups = db.query(models.ScheduledFollowup).filter(models.ScheduledFollowup.email_id == email_id).all()
+    return {
+        "ok": True,
+        "sent_to": email.recipient_email,
+        "follow_ups_scheduled": len(followups),
+        "follow_ups": [FollowupOut.model_validate(f) for f in followups],
+    }
+
+
+@app.get("/api/emails/{email_id}/followups")
+async def get_followups(
+    email_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    followups = db.query(models.ScheduledFollowup).filter(
+        models.ScheduledFollowup.email_id == email_id
+    ).order_by(models.ScheduledFollowup.send_on_day).all()
+    return [FollowupOut.model_validate(f) for f in followups]
+
+
+async def _followup_scheduler():
+    """Background loop: every 5 minutes check for due follow-ups and send them."""
+    import logging
+    logger = logging.getLogger("followup_scheduler")
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+            db = SessionLocal()
+            try:
+                now = datetime.utcnow()
+                due = db.query(models.ScheduledFollowup).filter(
+                    models.ScheduledFollowup.status == "pending",
+                    models.ScheduledFollowup.send_at <= now,
+                ).all()
+                for fu in due:
+                    try:
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, send_email, fu.recipient, fu.subject, fu.body
+                        )
+                        fu.status = "sent"
+                        fu.sent_at = datetime.utcnow()
+                        logger.info(f"Follow-up #{fu.follow_up_number} sent to {fu.recipient}")
+                    except Exception as exc:
+                        fu.status = "failed"
+                        fu.error = str(exc)
+                        logger.error(f"Follow-up #{fu.follow_up_number} failed: {exc}")
+                if due:
+                    db.commit()
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger("followup_scheduler").error(f"Scheduler error: {exc}")
 
 
 @app.post("/api/campaigns/{campaign_id}/generate-emails-bulk")
