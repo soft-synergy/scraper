@@ -163,37 +163,41 @@ Ocena: outdated={audit['outdated_score']}/100, bezpieczeństwo={audit['security_
 
 TWOJA OFERTA: {sender_offer}
 
-━━━ KONTEKST KULTUROWY ━━━
-Piszesz do polskiego przedsiębiorcy. W Polsce zimne maile sprzedażowe są odbierane bardzo sceptycznie.
-Skuteczny email w polskich realiach to NIE "alarm sprzedażowy" — to krótka, rzeczowa wiadomość od eksperta,
-który dzieli się czymś konkretnie przydatnym. Żadnej presji, żadnego hype'u, żadnych wykrzykników.
-Ton: spokojny, profesjonalny, pomocny. Jakbyś pisał do znajomego z branży.
+━━━ FILOZOFIA TEGO EMAILA ━━━
+Odbiorca to polski przedsiębiorca (np. trener, właściciel salonu, usługodawca). Ma gdzieś techniczne żargony.
+Ale NIE ma gdzieś tego czy traci klientów przez kiepską stronę.
+
+Twoje zadanie: wziąć suchy wynik techniczny z audytu i przetłumaczyć go na język jego biznesu.
+Nie "brak nagłówka HSTS" — tylko "klient wchodzi na stronę, Chrome wyświetla ostrzeżenie, wychodzi do konkurencji".
+Nie "copyright 2018" — tylko "strona wygląda jak porzucona, nowy klient to widzi i szuka kogoś aktywnego".
+
+Ton: bezpośredni, konkretny, bez hype'u. Polski styl — kulturalny, żaden wykrzyknik, żadne CAPS.
+Ale wartość pokazana ostro — tak żeby odbiorca poczuł że coś traci.
 
 ━━━ ZASADY ━━━
 
 1. JĘZYK: Wyłącznie po polsku.
 
-2. OTWIERANIE: Zacznij od "Dzień dobry," — to jest standard w polskiej korespondencji biznesowej.
-   Drugie zdanie: krótko kim jesteś i skąd masz info ("przeprowadziłem rutynowy audyt stron w branży {keyword}").
+2. OTWIERANIE: "Dzień dobry," — obowiązkowo. Następnie 1 zdanie: kim jesteś i że przejrzałeś stronę w ramach analizy branży {keyword}.
 
-3. KONKRETNY FAKT: Wspomnij 1-2 rzeczy z audytu — spokojnie, jak obserwacja, nie alarm.
-   Np. "Zauważyłem, że strona nie ma certyfikatu SSL" lub "copyright wskazuje na {audit.get('copyright_year', 'stary rok')} — strona może sprawiać wrażenie nieaktualnej".
-   Przetłumacz na praktyczny efekt dla ich firmy (nie strasz, informuj).
+3. SERCE EMAILA — WARTOŚĆ BIZNESOWA:
+   Weź 1-2 najważniejsze znaleziska z audytu. Opisz je językiem strat biznesowych dla tej konkretnej branży ({keyword}):
+   - Co przez to traci? (klienci, zapytania, pozycja w Google, zaufanie)
+   - Jak to wygląda oczami potencjalnego klienta tej osoby?
+   Żadnego technicznego żargonu bez tłumaczenia. Żadnych ogólników — tylko to co dotyczy {domain}.
 
-4. PROPOZYCJA: Zaproponuj 15-minutową rozmowę żeby pokazać pełne wyniki audytu — bez zobowiązań.
-   Sformułuj to jako "jeśli byłoby to pomocne" — nie naciskaj.
+4. CTA: Masz pełen raport z audytu — zaproponuj 15 min żeby go pokazać. Konkretnie i bez owijania w bawełnę.
    Link: {BOOKING_LINK}
 
-5. DŁUGOŚĆ: Max 90 słów w treści. Polacy nie czytają długich maili od nieznajomych.
+5. DŁUGOŚĆ: Max 90 słów. Czytają na telefonie między klientami.
 
-6. TEMAT: 5-7 słów, rzeczowy, bez wykrzykników i straszenia.
-   Dobry: "Audyt bezpieczeństwa strony {domain}" lub "Kilka uwag po analizie {domain}"
-   Zły: "UWAGA: Twoja strona traci klientów!"
+6. TEMAT: Konkretny, nawiązuje do ich branży lub strony. Bez wykrzykników.
+   Dobry: "Znalazłem problem na {domain} — dotyczy pozyskiwania klientów"
+   Zły: "Twoja strona TRACI klientów!!!"
 
-7. PODPIS: Imię i nazwisko, stanowisko — bez linków w podpisie.
+7. PODPIS: {SENDER_NAME}, {SENDER_TITLE}
 
-8. STOPKA (obowiązkowa po pustej linii i "---"):
-   "{opt_out}"
+8. STOPKA po "---": "{opt_out}"
 
 Odpowiedz WYŁĄCZNIE poprawnym JSON:
 {{"subject": "...", "body": "..."}}"""
@@ -207,93 +211,69 @@ def _build_followup_prompt(audit: dict, keyword: str, language: str, sender_offe
     opt_out = OPT_OUT["pl"]
 
     strategies = {
-        1: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #1 (3 dni po pierwszym mailu) do właściciela {domain} (branża: {keyword}).
+        1: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #1 (dzień 3) do właściciela {domain} (branża: {keyword}).
 
-Temat poprzedniego emaila: "{original_subject}"
+Poprzedni temat: "{original_subject}"
+Znaleziska: {findings}
 
-ZNALEZISKA Z AUDYTU:
-{findings}
+━━━ ZADANIE ━━━
+Nie pisz przypomnienia. Daj im coś użytecznego — jedną konkretną rzecz którą mogą zrobić sami dziś, żeby poprawić sytuację swojego biznesu online. Pokaż że rozumiesz ich branżę ({keyword}), nie tylko technikalia.
 
-━━━ KONTEKST ━━━
-Polski przedsiębiorca, który nie odpowiedział na pierwszego maila. Nie ignoruj tego — po prostu jest zajęty.
-Nie naciskaj. Daj mu coś konkretnie użytecznego, za darmo, bez oczekiwania czegoś w zamian.
+Opisz tę jedną rzecz językiem efektu biznesowego (co zyskają/przestaną tracić), nie językiem technicznym.
+Na końcu zostaw link do pełnego raportu bez nacisku: {BOOKING_LINK}
 
-━━━ ZASADY ━━━
-1. JĘZYK: Wyłącznie po polsku.
-2. Zacznij od "Dzień dobry," — krótko nawiąż do poprzedniej wiadomości.
-3. Podaj JEDNĄ praktyczną wskazówkę z audytu którą właściciel może zastosować samodzielnie — opisz konkretnie jak.
-4. Na końcu wspomnij miękko że masz pełen raport, jeśli byłoby pomocne: {BOOKING_LINK}
-5. Żadnej presji, żadnego "ostatnia szansa". Ton: pomocny kolega z branży.
-6. Max 80 słów. Temat: rzeczowy, np. "Mała wskazówka dot. {domain}"
-7. STOPKA po "---": "{opt_out}"
+Dzień dobry na początku. Max 80 słów. Bez wykrzykników. Temat: konkretny, nawiązuje do wartości.
+STOPKA po "---": "{opt_out}"
 
-Odpowiedz WYŁĄCZNIE JSON:
+JSON:
 {{"subject": "...", "body": "..."}}""",
 
-        2: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #2 (7 dni po pierwszym mailu) do właściciela {domain} (branża: {keyword}).
+        2: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #2 (dzień 7) do właściciela {domain} (branża: {keyword}).
 
-Temat poprzedniego emaila: "{original_subject}"
+Poprzedni temat: "{original_subject}"
+Znaleziska: {findings}
 
-ZNALEZISKA Z AUDYTU:
-{findings}
+━━━ ZADANIE ━━━
+Krótki, wartościowy mail. Nie przypomnienie — jeden konkretny fakt który ich zaskoczy lub uświadomi coś o ich biznesie.
+Np. jak Google ocenia strony z ich problemem technicznym, albo jak potencjalny klient widzi ich stronę vs konkurencję.
+Konkretnie i po polsku — kulturalnie, ale bez owijania w bawełnę.
+Krótkie CTA: {BOOKING_LINK}
 
-━━━ KONTEKST ━━━
-Dwa maile bez odpowiedzi. Szanujesz to — po prostu krótko przypominasz o sobie.
-W Polsce nachalność jest bardzo źle odbierana. Ten mail ma być krótki i bez presji.
+Dzień dobry na początku. Max 60 słów. Temat: konkretny fakt lub pytanie retoryczne.
+STOPKA po "---": "{opt_out}"
 
-━━━ ZASADY ━━━
-1. JĘZYK: Wyłącznie po polsku.
-2. Zacznij od "Dzień dobry," — jedno zdanie że wracasz do tematu.
-3. Przypomnij w jednym zdaniu najważniejsze znalezisko z audytu — spokojnie, bez alarmu.
-4. Zaproponuj krótką rozmowę jeśli temat jest aktualny: {BOOKING_LINK}
-5. Wyraźnie zaznacz że rozumiesz jeśli to nie jest dobry moment — bez urazy.
-6. Max 50 słów. Temat: "Nawiązanie do poprzedniej wiadomości" lub podobny.
-7. STOPKA po "---": "{opt_out}"
-
-Odpowiedz WYŁĄCZNIE JSON:
+JSON:
 {{"subject": "...", "body": "..."}}""",
 
-        3: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #3 (14 dni po pierwszym mailu) do właściciela {domain} (branża: {keyword}).
+        3: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #3 (dzień 14) do właściciela {domain} (branża: {keyword}).
 
-Temat poprzedniego emaila: "{original_subject}"
+Poprzedni temat: "{original_subject}"
+Główny problem: {top_issue[:100]}
 
-ZNALEZISKA Z AUDYTU:
-{findings}
+━━━ ZADANIE ━━━
+Krótka historia z praktyki — case z branży {keyword}. Ktoś miał ten sam problem co {domain}.
+Co się zmieniło po naprawieniu? Realistycznie — nie "wzrost 300%" tylko "przestał tracić zapytania przez X" albo "Google zaczął go pokazywać wyżej".
+Zostaw link: {BOOKING_LINK}
 
-━━━ KONTEKST ━━━
-Trzy maile bez odpowiedzi. Zamiast kolejnego przypomnienia — podziel się czymś wartościowym.
-Krótka historia z praktyki. Bez wielkich liczb, bez reklamy — zwykły przypadek z pracy.
+Dzień dobry na początku. Max 70 słów. Pisz jak człowiek, nie jak case study. Temat: nawiązuje do branży.
+STOPKA po "---": "{opt_out}"
 
-━━━ ZASADY ━━━
-1. JĘZYK: Wyłącznie po polsku.
-2. Zacznij od "Dzień dobry," — jedno zdanie wprowadzenia.
-3. Opisz krótko case z podobnej branży ({keyword}) — konkretny problem, konkretny efekt po naprawieniu. Realistycznie, nie "300% wzrostu".
-4. Wspomnij że {domain} ma podobny problem: {top_issue[:80]}.
-5. Zostaw link bez nacisku: {BOOKING_LINK}
-6. Max 70 słów. Temat: np. "Przypadek z branży {keyword}"
-7. STOPKA po "---": "{opt_out}"
-
-Odpowiedz WYŁĄCZNIE JSON:
+JSON:
 {{"subject": "...", "body": "..."}}""",
 
-        4: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz ostatni follow-up #4 (21 dni po pierwszym mailu) do właściciela {domain} (branża: {keyword}).
+        4: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz ostatni follow-up #4 (dzień 21) do właściciela {domain} (branża: {keyword}).
 
-Temat poprzedniego emaila: "{original_subject}"
+Poprzedni temat: "{original_subject}"
 
-━━━ KONTEKST ━━━
-To ostatnia wiadomość. W Polsce docenia się gdy ktoś szanuje granice — powiedz wprost że to ostatni mail.
-Zostaw drzwi otwarte, bez żalu, bez presji. Ciepło i po ludzku.
+━━━ ZADANIE ━━━
+Ostatnia wiadomość — powiedz to wprost na początku. W Polsce to jest cenione.
+Zostaw im raport jako prezent — coś konkretnego czego mogą użyć kiedy przyjdzie czas: {BOOKING_LINK}
+Życz powodzenia. Zostaw drzwi otwarte. Zero presji, zero żalu.
 
-━━━ ZASADY ━━━
-1. JĘZYK: Wyłącznie po polsku.
-2. Zacznij od "Dzień dobry," — powiedz że to ostatnia wiadomość w tej sprawie.
-3. Zostaw link do raportu na przyszłość gdy przyjdzie odpowiedni moment: {BOOKING_LINK}
-4. Życz powodzenia z {domain} — szczerze, bez ironii.
-5. Max 55 słów. Ton: spokojny, życzliwy, definitywny.
-6. Temat: np. "Ostatnia wiadomość — {domain}"
-7. STOPKA po "---": "{opt_out}"
+Dzień dobry na początku. Max 55 słów. Ciepły ale definitywny ton.
+STOPKA po "---": "{opt_out}"
 
-Odpowiedz WYŁĄCZNIE JSON:
+JSON:
 {{"subject": "...", "body": "..."}}""",
     }
 
