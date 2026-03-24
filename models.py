@@ -22,6 +22,14 @@ class User(Base):
     onboarding_done = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Per-user SMTP settings (override env vars when set)
+    smtp_host = Column(String, nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    smtp_login = Column(String, nullable=True)
+    smtp_password = Column(String, nullable=True)
+    from_email = Column(String, nullable=True)
+    from_name = Column(String, nullable=True)
+
     campaigns = relationship("Campaign", back_populates="owner", cascade="all, delete-orphan")
 
 

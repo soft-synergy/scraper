@@ -124,6 +124,14 @@
           </svg>
           Status schedulera
         </button>
+        <button @click="openView('smtp-settings')"
+          :class="currentView === 'smtp-settings' ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'"
+          class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors mt-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+          Ustawienia SMTP
+        </button>
       </div>
     </nav>
 
@@ -768,6 +776,58 @@
       </template>
     </div>
 
+    <!-- ══════════════════════════════════════════════════════════════ SMTP SETTINGS -->
+    <div x-show="currentView === 'smtp-settings'" x-transition class="p-6 max-w-2xl mx-auto">
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-white">Ustawienia SMTP</h1>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+        <p class="text-sm text-gray-400 mb-5">Konfiguracja serwera SMTP do wysyłki maili. Pozostaw puste pola aby używać wartości z konfiguracji serwera.</p>
+        <form @submit.prevent="saveSmtpSettings()" class="space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1 uppercase font-semibold tracking-wider">SMTP Host</label>
+              <input x-model="smtpSettings.smtp_host" type="text" placeholder="smtp-relay.brevo.com"
+                class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1 uppercase font-semibold tracking-wider">SMTP Port</label>
+              <input x-model.number="smtpSettings.smtp_port" type="number" placeholder="587"
+                class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1 uppercase font-semibold tracking-wider">Login SMTP</label>
+              <input x-model="smtpSettings.smtp_login" type="text" placeholder="login@smtp-brevo.com"
+                class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1 uppercase font-semibold tracking-wider">Hasło SMTP</label>
+              <input x-model="smtpSettings.smtp_password" type="password" placeholder="••••••••"
+                class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1 uppercase font-semibold tracking-wider">Email nadawcy (FROM)</label>
+              <input x-model="smtpSettings.from_email" type="email" placeholder="info@example.com"
+                class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1 uppercase font-semibold tracking-wider">Nazwa nadawcy</label>
+              <input x-model="smtpSettings.from_name" type="text" placeholder="Jan Kowalski"
+                class="w-full bg-gray-800 border border-gray-700 focus:border-violet-500 focus:outline-none rounded-lg px-3 py-2 text-white text-sm transition-colors">
+            </div>
+          </div>
+          <div class="flex items-center gap-3 pt-2">
+            <button type="submit" :disabled="smtpSaving"
+              class="px-5 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
+              <span x-show="!smtpSaving">Zapisz ustawienia</span>
+              <span x-show="smtpSaving">Zapisywanie...</span>
+            </button>
+            <span x-show="smtpSaved" x-transition class="text-green-400 text-sm">Zapisano!</span>
+          </div>
+        </form>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1334,6 +1394,10 @@
       scheduledPagination: { total: 0, page: 1, page_size: 50 },
       // Scheduler status
       schedulerStatus: null,
+      // SMTP settings
+      smtpSettings: { smtp_host: '', smtp_port: null, smtp_login: '', smtp_password: '', from_email: '', from_name: '' },
+      smtpSaving: false,
+      smtpSaved: false,
       newCampaign: { name: '', keyword: '', max_sites: 200, country: 'auto' },
       // Email generation
       generatingEmail: false,
@@ -1689,6 +1753,7 @@
         if (view === 'email-logs') await this.loadEmailLogs();
         if (view === 'scheduled') await this.loadScheduledEmails();
         if (view === 'scheduler-status') await this.loadSchedulerStatus();
+        if (view === 'smtp-settings') await this.loadSmtpSettings();
       },
 
       async loadEmailLogs() {
@@ -1733,6 +1798,48 @@
           const r = await this.apiFetch(`${API}/api/admin/scheduler`);
           if (r && r.ok) this.schedulerStatus = await r.json();
         } catch {}
+      },
+
+      async loadSmtpSettings() {
+        try {
+          const r = await this.apiFetch(`${API}/api/settings/smtp`);
+          if (r && r.ok) {
+            const data = await r.json();
+            this.smtpSettings = {
+              smtp_host: data.smtp_host || '',
+              smtp_port: data.smtp_port || null,
+              smtp_login: data.smtp_login || '',
+              smtp_password: data.smtp_password || '',
+              from_email: data.from_email || '',
+              from_name: data.from_name || '',
+            };
+          }
+        } catch {}
+      },
+
+      async saveSmtpSettings() {
+        this.smtpSaving = true;
+        this.smtpSaved = false;
+        try {
+          const payload = {};
+          if (this.smtpSettings.smtp_host) payload.smtp_host = this.smtpSettings.smtp_host;
+          if (this.smtpSettings.smtp_port) payload.smtp_port = this.smtpSettings.smtp_port;
+          if (this.smtpSettings.smtp_login) payload.smtp_login = this.smtpSettings.smtp_login;
+          if (this.smtpSettings.smtp_password) payload.smtp_password = this.smtpSettings.smtp_password;
+          if (this.smtpSettings.from_email) payload.from_email = this.smtpSettings.from_email;
+          if (this.smtpSettings.from_name) payload.from_name = this.smtpSettings.from_name;
+          const r = await this.apiFetch(`${API}/api/settings/smtp`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (r && r.ok) {
+            this.smtpSaved = true;
+            setTimeout(() => this.smtpSaved = false, 3000);
+          }
+        } finally {
+          this.smtpSaving = false;
+        }
       },
 
       async startBulkGenerate() {

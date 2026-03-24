@@ -27,7 +27,7 @@ from limits import check_campaign_limit, check_email_limit, check_feature, get_m
 from stripe_client import PLANS, get_plan, create_checkout_session, create_portal_session, handle_webhook_event
 from scraper.orchestrator import run_campaign
 from scraper.email_generator import generate_email
-from scraper.mailer import send_email
+from scraper.mailer import send_email, get_user_smtp_config
 
 
 # ─── DB Init + Migrations ─────────────────────────────────────────────────────
@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
         "ALTER TABLE generated_emails ADD COLUMN follow_ups TEXT",
         "ALTER TABLE websites ADD COLUMN page_description TEXT",
         "ALTER TABLE websites ADD COLUMN page_headings TEXT",
+        "ALTER TABLE users ADD COLUMN smtp_host TEXT",
+        "ALTER TABLE users ADD COLUMN smtp_port INTEGER",
+        "ALTER TABLE users ADD COLUMN smtp_login TEXT",
+        "ALTER TABLE users ADD COLUMN smtp_password TEXT",
+        "ALTER TABLE users ADD COLUMN from_email TEXT",
+        "ALTER TABLE users ADD COLUMN from_name TEXT",
     ]:
         try:
             con.execute(sql)
@@ -235,6 +241,24 @@ class LeadRequest(BaseModel):
     source: str = "landing"
 
 
+class SmtpSettingsIn(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_login: Optional[str] = None
+    smtp_password: Optional[str] = None
+    from_email: Optional[str] = None
+    from_name: Optional[str] = None
+
+
+class SmtpSettingsOut(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_login: Optional[str] = None
+    smtp_password: Optional[str] = None
+    from_email: Optional[str] = None
+    from_name: Optional[str] = None
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 def campaign_to_out(campaign: models.Campaign, db: Session) -> Dict[str, Any]:
     total = db.query(models.Website).filter(models.Website.campaign_id == campaign.id).count()
@@ -334,6 +358,33 @@ async def update_me(
         current_user.onboarding_done = body["onboarding_done"]
     if "name" in body:
         current_user.name = body["name"]
+    db.commit()
+    return {"ok": True}
+
+
+# ─── SMTP Settings ────────────────────────────────────────────────────────────
+@app.get("/api/settings/smtp")
+async def get_smtp_settings(
+    current_user: models.User = Depends(get_current_user),
+):
+    return SmtpSettingsOut(
+        smtp_host=current_user.smtp_host,
+        smtp_port=current_user.smtp_port,
+        smtp_login=current_user.smtp_login,
+        smtp_password=current_user.smtp_password,
+        from_email=current_user.from_email,
+        from_name=current_user.from_name,
+    )
+
+
+@app.patch("/api/settings/smtp")
+async def update_smtp_settings(
+    data: SmtpSettingsIn,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value)
     db.commit()
     return {"ok": True}
 
@@ -1070,9 +1121,10 @@ async def send_email_now(
         raise HTTPException(status_code=400, detail="Brak adresu email odbiorcy")
 
     # Send main email
+    smtp_cfg = get_user_smtp_config(current_user)
     try:
         await asyncio.get_running_loop().run_in_executor(
-            None, send_email, email.recipient_email, email.subject, email.body
+            None, send_email, email.recipient_email, email.subject, email.body, smtp_cfg
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Błąd wysyłki: {exc}")
@@ -1133,14 +1185,21 @@ async def _followup_scheduler():
             db = SessionLocal()
             try:
                 now = datetime.utcnow()
-                due = db.query(models.ScheduledFollowup).filter(
+                due = db.query(models.ScheduledFollowup).options(
+                    joinedload(models.ScheduledFollowup.email)
+                    .joinedload(models.GeneratedEmail.website)
+                    .joinedload(models.Website.campaign)
+                    .joinedload(models.Campaign.owner)
+                ).filter(
                     models.ScheduledFollowup.status == "pending",
                     models.ScheduledFollowup.send_at <= now,
                 ).all()
                 for fu in due:
                     try:
+                        owner = fu.email.website.campaign.owner if fu.email and fu.email.website and fu.email.website.campaign else None
+                        smtp_cfg = get_user_smtp_config(owner) if owner else {}
                         await asyncio.get_running_loop().run_in_executor(
-                            None, send_email, fu.recipient, fu.subject, fu.body
+                            None, send_email, fu.recipient, fu.subject, fu.body, smtp_cfg
                         )
                         fu.status = "sent"
                         fu.sent_at = datetime.utcnow()
