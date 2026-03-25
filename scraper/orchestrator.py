@@ -3,6 +3,7 @@ Campaign orchestrator - manages the full scrape lifecycle.
 """
 import asyncio
 import json
+import re
 import random
 from datetime import datetime
 from typing import List
