@@ -13,6 +13,7 @@ from typing import List, Optional, Any, Dict
 from dotenv import load_dotenv
 load_dotenv()
 
+import httpx
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
@@ -50,6 +51,9 @@ async def lifespan(app: FastAPI):
         "ALTER TABLE users ADD COLUMN smtp_password TEXT",
         "ALTER TABLE users ADD COLUMN from_email TEXT",
         "ALTER TABLE users ADD COLUMN from_name TEXT",
+        "ALTER TABLE users ADD COLUMN brevo_api_key TEXT",
+        "ALTER TABLE generated_emails ADD COLUMN brevo_message_id TEXT",
+        "ALTER TABLE scheduled_followups ADD COLUMN brevo_message_id TEXT",
     ]:
         try:
             con.execute(sql)
@@ -248,6 +252,7 @@ class SmtpSettingsIn(BaseModel):
     smtp_password: Optional[str] = None
     from_email: Optional[str] = None
     from_name: Optional[str] = None
+    brevo_api_key: Optional[str] = None
 
 
 class SmtpSettingsOut(BaseModel):
@@ -257,6 +262,7 @@ class SmtpSettingsOut(BaseModel):
     smtp_password: Optional[str] = None
     from_email: Optional[str] = None
     from_name: Optional[str] = None
+    brevo_api_key: Optional[str] = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -384,6 +390,7 @@ async def get_smtp_settings(
         smtp_password=current_user.smtp_password,
         from_email=current_user.from_email,
         from_name=current_user.from_name,
+        brevo_api_key=current_user.brevo_api_key,
     )
 
 
@@ -975,11 +982,13 @@ async def get_email_logs(
         {
             "type": "main",
             "email_id": e.id,
+            "followup_id": None,
             "recipient": e.recipient_email,
             "subject": e.subject,
             "status": e.status,
             "sent_at": e.generated_at.isoformat() if e.generated_at else None,
             "website_id": e.website_id,
+            "brevo_message_id": e.brevo_message_id,
         }
         for e in sent_main
     ]
@@ -987,12 +996,14 @@ async def get_email_logs(
         {
             "type": f"followup_{f.follow_up_number}",
             "email_id": f.email_id,
+            "followup_id": f.id,
             "recipient": f.recipient,
             "subject": f.subject,
             "status": f.status,
             "sent_at": f.sent_at.isoformat() if f.sent_at else None,
             "error": f.error,
             "website_id": None,
+            "brevo_message_id": f.brevo_message_id,
         }
         for f in sent_followups
     ]
@@ -1001,6 +1012,52 @@ async def get_email_logs(
     total = len(all_logs)
     start = (page - 1) * page_size
     return {"total": total, "page": page, "page_size": page_size, "logs": all_logs[start:start + page_size]}
+
+
+@app.get("/api/emails/{email_id}/brevo-events")
+async def get_brevo_email_events(
+    email_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    email = db.query(models.GeneratedEmail).filter(models.GeneratedEmail.id == email_id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _fetch_brevo_events(email.brevo_message_id, current_user)
+
+
+@app.get("/api/followups/{followup_id}/brevo-events")
+async def get_brevo_followup_events(
+    followup_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    fu = db.query(models.ScheduledFollowup).filter(models.ScheduledFollowup.id == followup_id).first()
+    if not fu:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _fetch_brevo_events(fu.brevo_message_id, current_user)
+
+
+async def _fetch_brevo_events(message_id: Optional[str], user: models.User) -> dict:
+    api_key = user.brevo_api_key or os.environ.get("BREVO_API_KEY", "")
+    if not api_key:
+        return {"events": [], "error": "no_api_key", "message_id": message_id}
+    if not message_id:
+        return {"events": [], "error": "no_message_id", "message_id": None}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.brevo.com/v3/smtp/emails",
+                headers={"api-key": api_key},
+                params={"messageId": message_id, "sort": "desc"},
+            )
+        r.raise_for_status()
+        data = r.json()
+        emails_data = data.get("transactionalEmails", [])
+        events = emails_data[0].get("events", []) if emails_data else []
+        return {"events": events, "message_id": message_id}
+    except Exception as exc:
+        return {"events": [], "error": str(exc), "message_id": message_id}
 
 
 @app.get("/api/admin/scheduler")
@@ -1135,9 +1192,11 @@ async def send_email_now(
     # Send main email
     smtp_cfg = get_user_smtp_config(current_user)
     try:
-        await asyncio.get_running_loop().run_in_executor(
+        message_id = await asyncio.get_running_loop().run_in_executor(
             None, send_email, email.recipient_email, email.subject, email.body, smtp_cfg
         )
+        if message_id:
+            email.brevo_message_id = message_id
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Błąd wysyłki: {exc}")
 
@@ -1210,11 +1269,13 @@ async def _followup_scheduler():
                     try:
                         owner = fu.email.website.campaign.owner if fu.email and fu.email.website and fu.email.website.campaign else None
                         smtp_cfg = get_user_smtp_config(owner) if owner else {}
-                        await asyncio.get_running_loop().run_in_executor(
+                        msg_id = await asyncio.get_running_loop().run_in_executor(
                             None, send_email, fu.recipient, fu.subject, fu.body, smtp_cfg
                         )
                         fu.status = "sent"
                         fu.sent_at = datetime.utcnow()
+                        if msg_id:
+                            fu.brevo_message_id = msg_id
                         logger.info(f"Follow-up #{fu.follow_up_number} sent to {fu.recipient}")
                     except Exception as exc:
                         fu.status = "failed"

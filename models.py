@@ -29,6 +29,7 @@ class User(Base):
     smtp_password = Column(String, nullable=True)
     from_email = Column(String, nullable=True)
     from_name = Column(String, nullable=True)
+    brevo_api_key = Column(String, nullable=True)
 
     campaigns = relationship("Campaign", back_populates="owner", cascade="all, delete-orphan")
 
@@ -167,6 +168,7 @@ class GeneratedEmail(Base):
     recipient_email = Column(String, nullable=True)
     status = Column(String, default="draft")  # draft|sent
     follow_ups = Column(Text, nullable=True)  # JSON array of follow-up emails
+    brevo_message_id = Column(String, nullable=True)
     generated_at = Column(DateTime, default=datetime.utcnow)
 
     website = relationship("Website", backref="generated_emails")
@@ -187,5 +189,6 @@ class ScheduledFollowup(Base):
     status = Column(String, default="pending")            # pending|sent|failed
     sent_at = Column(DateTime, nullable=True)
     error = Column(Text, nullable=True)
+    brevo_message_id = Column(String, nullable=True)
 
     email = relationship("GeneratedEmail", back_populates="scheduled_followups")
