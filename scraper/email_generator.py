@@ -16,7 +16,7 @@ import httpx
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "xiaomi/mimo-v2-pro"
+MODEL = "xiaomi/mimo-v2-omni"
 
 SENDER_NAME = "Piotr Serczynski"
 SENDER_TITLE = "specjalista ds. bezpieczeństwa stron internetowych"
@@ -333,9 +333,12 @@ async def _call_llm(prompt: str) -> dict:
                 "temperature": 0.65,
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            raise ValueError(f"OpenRouter HTTP {resp.status_code}: {resp.text[:300]}")
 
     raw = resp.json()
+    if "error" in raw:
+        raise ValueError(f"OpenRouter error: {raw['error']}")
     text = raw["choices"][0]["message"].get("content") or ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
