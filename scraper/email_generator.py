@@ -16,7 +16,7 @@ import httpx
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "xiaomi/mimo-v2-omni"
+MODEL = "xiaomi/mimo-v2-pro"
 
 SENDER_NAME = "Piotr Serczynski"
 SENDER_TITLE = "specjalista ds. bezpieczeństwa stron internetowych"
@@ -337,15 +337,31 @@ async def _call_llm(prompt: str) -> dict:
             raise ValueError(f"OpenRouter HTTP {resp.status_code}: {resp.text[:300]}")
 
     raw = resp.json()
+
     if "error" in raw:
         raise ValueError(f"OpenRouter error: {raw['error']}")
     text = raw["choices"][0]["message"].get("content") or ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    json_match = re.search(r'\{[^{}]*"subject"[^{}]*"body"[^{}]*\}', text, re.DOTALL)
-    if json_match:
-        return json.loads(json_match.group())
-    return json.loads(text.strip())
+    if not text:
+        raise ValueError(f"OpenRouter returned empty content. Raw: {str(raw)[:300]}")
+
+    # Find outermost JSON object (handles nested braces in body)
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i+1])
+                    except json.JSONDecodeError:
+                        break
+
+    return json.loads(text)
 
 
 _BOOKING_PLACEHOLDERS = [
