@@ -6,6 +6,7 @@ Sender: Antoni Seba, specjalista od bezpieczeństwa stron internetowych.
 Strategy: 5-touch sequence — audit alert → free value → direct question
           → social proof → door closer. Never pushy. Always valuable.
 """
+import asyncio
 import os
 import json
 import re
@@ -317,24 +318,34 @@ async def _call_llm(prompt: str) -> dict:
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY not set")
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-        resp = await client.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://webleadscraper.pl",
-                "X-Title": "WebLeadScraper",
-            },
-            json={
-                "model": MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 800,
-                "temperature": 0.65,
-            },
-        )
+    last_error = None
+    for attempt in range(3):
+        if attempt > 0:
+            await asyncio.sleep(2 ** attempt)  # 2s, 4s
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            resp = await client.post(
+                OPENROUTER_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://webleadscraper.pl",
+                    "X-Title": "WebLeadScraper",
+                },
+                json={
+                    "model": MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 800,
+                    "temperature": 0.65,
+                },
+            )
+        if resp.status_code in (500, 502, 503, 504):
+            last_error = ValueError(f"OpenRouter HTTP {resp.status_code}: {resp.text[:300]}")
+            continue
         if not resp.is_success:
             raise ValueError(f"OpenRouter HTTP {resp.status_code}: {resp.text[:300]}")
+        break
+    else:
+        raise last_error
 
     raw = resp.json()
 
