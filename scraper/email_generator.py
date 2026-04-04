@@ -31,8 +31,64 @@ LANG_BY_TLD = {
 }
 
 LANG_NAMES = {
-    "pl": "Polish", "cs": "Czech", "de": "German", "fr": "French",
-    "es": "Spanish", "it": "Italian", "nl": "Dutch", "en": "English",
+    "pl": "Polish",
+    "cs": "Czech",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "nl": "Dutch",
+    "en": "English",
+}
+
+COUNTRY_TO_LANG = {
+    "pl": "pl",
+    "cz": "cs",
+    "sk": "cs",
+    "de": "de",
+    "at": "de",
+    "ch": "de",
+    "fr": "fr",
+    "es": "es",
+    "it": "it",
+    "nl": "nl",
+    "uk": "en",
+    "us": "en",
+}
+
+LANGUAGE_HINTS = {
+    "pl": [
+        " i ", " na ", " jest ", " oraz ", " kontakt ", " oferta ", " uslugi ",
+        " strona ", " witamy ", " firma ", " klient ",
+    ],
+    "cs": [
+        " a ", " na ", " je ", " kontakt ", " sluzby ", " sluzby ", " vitejte ",
+        " firma ", " zakaznik ", " sluzby ", " web ",
+    ],
+    "de": [
+        " und ", " ist ", " kontakt ", " angebot ", " dienstleistungen ", " willkommen ",
+        " unternehmen ", " kunde ", " sicherheit ",
+    ],
+    "fr": [
+        " et ", " est ", " contact ", " offre ", " services ", " bienvenue ",
+        " entreprise ", " client ", " securite ",
+    ],
+    "es": [
+        " y ", " contacto ", " oferta ", " servicios ", " bienvenida ", " empresa ",
+        " cliente ", " seguridad ", " sitio ",
+    ],
+    "it": [
+        " e ", " contatti ", " offerta ", " servizi ", " benvenuti ", " azienda ",
+        " cliente ", " sicurezza ", " sito ",
+    ],
+    "nl": [
+        " en ", " contact ", " aanbod ", " diensten ", " welkom ", " bedrijf ",
+        " klant ", " beveiliging ", " website ",
+    ],
+    "en": [
+        " and ", " the ", " contact ", " services ", " welcome ", " business ",
+        " client ", " security ", " website ",
+    ],
 }
 
 OPT_OUT = {
@@ -43,9 +99,63 @@ OPT_OUT = {
 }
 
 
-def _detect_language(keyword: str, country: str, domain: str = "") -> str:
-    # Always Polish — target market is Poland
-    return "pl"
+def _normalize_lang_text(value: str) -> str:
+    value = (value or "").lower()
+    replacements = {
+        "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n", "ó": "o", "ś": "s", "ź": "z", "ż": "z",
+        "á": "a", "à": "a", "ä": "a", "â": "a",
+        "é": "e", "è": "e", "ë": "e", "ê": "e",
+        "í": "i", "ì": "i", "ï": "i", "î": "i",
+        "ó": "o", "ò": "o", "ö": "o", "ô": "o",
+        "ú": "u", "ù": "u", "ü": "u", "û": "u",
+        "ý": "y", "č": "c", "ď": "d", "ě": "e", "ň": "n", "ř": "r", "š": "s", "ť": "t", "ž": "z",
+    }
+    for src, dst in replacements.items():
+        value = value.replace(src, dst)
+    return f" {value} "
+
+
+def _safe_headings_list(headings_raw) -> list[str]:
+    if not headings_raw:
+        return []
+    if isinstance(headings_raw, list):
+        return [str(h) for h in headings_raw if h]
+    try:
+        parsed = json.loads(headings_raw)
+        if isinstance(parsed, list):
+            return [str(h) for h in parsed if h]
+    except Exception:
+        return []
+    return []
+
+
+def _detect_language(site_data: dict, keyword: str, country: str, domain: str = "") -> str:
+    text_parts = [
+        site_data.get("title", ""),
+        site_data.get("page_description", ""),
+        " ".join(_safe_headings_list(site_data.get("page_headings"))),
+        keyword or "",
+    ]
+    normalized = _normalize_lang_text(" ".join(part for part in text_parts if part))
+
+    scores = {lang: 0 for lang in LANG_NAMES}
+    for lang, hints in LANGUAGE_HINTS.items():
+        for hint in hints:
+            scores[lang] += normalized.count(hint)
+
+    best_lang = max(scores, key=scores.get)
+    if scores[best_lang] > 0:
+        return best_lang
+
+    tld = domain.rsplit(".", 1)[-1].lower() if "." in (domain or "") else ""
+    if tld in LANG_BY_TLD:
+        return LANG_BY_TLD[tld]
+
+    country_lang = COUNTRY_TO_LANG.get((country or "").lower())
+    if country_lang:
+        return country_lang
+
+    return "en"
 
 
 def _build_page_context(site_data: dict) -> str:
@@ -57,20 +167,16 @@ def _build_page_context(site_data: dict) -> str:
     tech = site_data.get("tech_result") or {}
 
     if title:
-        parts.append(f"Tytuł strony: {title}")
+        parts.append(f"Page title: {title}")
     if desc:
-        parts.append(f"Opis (meta): {desc}")
+        parts.append(f"Meta description: {desc}")
     if headings_raw:
-        try:
-            import json as _json
-            headings = _json.loads(headings_raw)
-            if headings:
-                parts.append("Nagłówki H1/H2: " + " | ".join(headings))
-        except Exception:
-            pass
+        headings = _safe_headings_list(headings_raw)
+        if headings:
+            parts.append("Headings (H1/H2): " + " | ".join(headings))
     cms = tech.get("detected_cms") or tech.get("detected_framework")
     if cms:
-        parts.append(f"Technologia: {cms}")
+        parts.append(f"Technology: {cms}")
     cdn = tech.get("detected_cdn")
     if cdn:
         parts.append(f"CDN: {cdn}")
@@ -173,138 +279,126 @@ def _build_audit_summary(site_data: dict) -> dict:
 
 def _findings_text(findings: list, lang_key: str, limit: int = 4) -> str:
     if not findings:
-        return "  - (brak krytycznych błędów — email skup się na drobnych optymalizacjach)"
+        return "  - No major issues found. Focus on a small but credible improvement."
     return "\n".join(
         f"  - [{f['severity'].upper()}] {f.get(lang_key, f.get('en', ''))}"
         for f in findings[:limit]
     )
 
 
-def _build_main_prompt(audit: dict, keyword: str, language: str, sender_offer: str, page_context: str = "") -> str:
+def _build_main_prompt(
+    audit: dict,
+    keyword: str,
+    language: str,
+    sender_name: str,
+    sender_title: str,
+    sender_offer: str,
+    page_context: str = "",
+) -> str:
     domain = audit["domain"] or "strona"
-    findings = _findings_text(audit["findings"], "pl")
-    opt_out = OPT_OUT["pl"]
-    top_issue = audit["findings"][0]["pl"] if audit["findings"] else "kilka kwestii technicznych"
-    page_ctx_section = f"\nKONTEKST STRONY (co wiemy o tym biznesie):\n{page_context}\n" if page_context else ""
+    findings = _findings_text(audit["findings"], "en")
+    opt_out = OPT_OUT.get(language, OPT_OUT["en"])
+    language_name = LANG_NAMES.get(language, "English")
+    page_ctx_section = f"\nWEBSITE CONTEXT:\n{page_context}\n" if page_context else ""
 
-    return f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Piszesz cold email do właściciela strony {domain} (branża: {keyword}).
+    return f"""You are {sender_name}, {sender_title}. Write a cold email to the owner of {domain}. Business niche: {keyword or 'unknown'}.
 {page_ctx_section}
 
-WYNIKI AUDYTU:
+AUDIT FINDINGS:
 {findings}
-Ocena: outdated={audit['outdated_score']}/100, bezpieczeństwo={audit['security_score']}/100
+Scores: outdated={audit['outdated_score']}/100, security={audit['security_score']}/100
 
-TWOJA OFERTA: {sender_offer}
+YOUR OFFER: {sender_offer}
 
-━━━ FILOZOFIA TEGO EMAILA ━━━
-Odbiorca to polski przedsiębiorca (np. trener, właściciel salonu, usługodawca). Ma gdzieś techniczne żargony.
-Ale NIE ma gdzieś tego czy traci klientów przez kiepską stronę.
+RULES:
+1. Write the entire email in {language_name}. Match the language used on the website. Do not default to Polish unless the website is clearly Polish.
+2. Use the WEBSITE CONTEXT as primary context about the business. Reference what the site actually offers, not generic assumptions.
+3. Translate technical findings into business impact. Show what they may be losing: trust, leads, conversions, search visibility, or credibility.
+4. Mention 1-2 strongest issues only. Keep it specific to this site and this business niche.
+5. Tone: direct, calm, credible, human. No hype, no exclamation marks, no ALL CAPS.
+6. Keep the body under 90 words.
+7. Include a concrete CTA offering a short 15-minute walkthrough of the report and include this link: {BOOKING_LINK}
+8. Sign as: {sender_name}, {sender_title}
+9. After a separator line '---', include exactly this opt-out line in {language_name} if available: "{opt_out}"
+10. Return valid JSON only.
 
-Twoje zadanie: wziąć suchy wynik techniczny z audytu i przetłumaczyć go na język jego biznesu.
-Nie "brak nagłówka HSTS" — tylko "klient wchodzi na stronę, Chrome wyświetla ostrzeżenie, wychodzi do konkurencji".
-Nie "copyright 2018" — tylko "strona wygląda jak porzucona, nowy klient to widzi i szuka kogoś aktywnego".
-
-Ton: bezpośredni, konkretny, bez hype'u. Polski styl — kulturalny, żaden wykrzyknik, żadne CAPS.
-Ale wartość pokazana ostro — tak żeby odbiorca poczuł że coś traci.
-
-━━━ ZASADY ━━━
-
-1. JĘZYK: Wyłącznie po polsku.
-
-2. OTWIERANIE: "Dzień dobry," — obowiązkowo. Następnie 1 zdanie: kim jesteś i że przejrzałeś stronę w ramach analizy branży {keyword}.
-
-3. SERCE EMAILA — WARTOŚĆ BIZNESOWA:
-   Weź 1-2 najważniejsze znaleziska z audytu. Opisz je językiem strat biznesowych dla tej konkretnej branży ({keyword}):
-   - Co przez to traci? (klienci, zapytania, pozycja w Google, zaufanie)
-   - Jak to wygląda oczami potencjalnego klienta tej osoby?
-   Żadnego technicznego żargonu bez tłumaczenia. Żadnych ogólników — tylko to co dotyczy {domain}.
-
-4. CTA: Masz pełen raport z audytu — zaproponuj 15 min żeby go pokazać. Konkretnie i bez owijania w bawełnę.
-   Link: {BOOKING_LINK}
-
-5. DŁUGOŚĆ: Max 90 słów. Czytają na telefonie między klientami.
-
-6. TEMAT: Konkretny, nawiązuje do ich branży lub strony. Bez wykrzykników.
-   Dobry: "Znalazłem problem na {domain} — dotyczy pozyskiwania klientów"
-   Zły: "Twoja strona TRACI klientów!!!"
-
-7. PODPIS: {SENDER_NAME}, {SENDER_TITLE}
-
-8. STOPKA po "---": "{opt_out}"
-
-Odpowiedz WYŁĄCZNIE poprawnym JSON:
+Output JSON:
 {{"subject": "...", "body": "..."}}"""
 
 
-def _build_followup_prompt(audit: dict, keyword: str, language: str, sender_offer: str,
-                            followup_num: int, day: int, original_subject: str) -> str:
+def _build_followup_prompt(
+    audit: dict,
+    keyword: str,
+    language: str,
+    sender_name: str,
+    sender_title: str,
+    sender_offer: str,
+    followup_num: int,
+    day: int,
+    original_subject: str,
+    page_context: str = "",
+) -> str:
     domain = audit["domain"] or "strona"
-    findings = _findings_text(audit["findings"], "pl", limit=2)
-    top_issue = audit["findings"][0]["pl"] if audit["findings"] else "problemy techniczne strony"
-    opt_out = OPT_OUT["pl"]
+    findings = _findings_text(audit["findings"], "en", limit=2)
+    top_issue = audit["findings"][0].get("en", "website issues") if audit["findings"] else "website issues"
+    opt_out = OPT_OUT.get(language, OPT_OUT["en"])
+    language_name = LANG_NAMES.get(language, "English")
+    page_ctx_section = f"\nWEBSITE CONTEXT:\n{page_context}\n" if page_context else ""
 
     strategies = {
-        1: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #1 (dzień 3) do właściciela {domain} (branża: {keyword}).
+        1: f"""You are {sender_name}, {sender_title}. Write follow-up #1 for day {day} to the owner of {domain}. Niche: {keyword or 'unknown'}.
+Previous subject: "{original_subject}"
+{page_ctx_section}
+FINDINGS:
+{findings}
 
-Poprzedni temat: "{original_subject}"
-Znaleziska: {findings}
-
-━━━ ZADANIE ━━━
-Nie pisz przypomnienia. Daj im coś użytecznego — jedną konkretną rzecz którą mogą zrobić sami dziś, żeby poprawić sytuację swojego biznesu online. Pokaż że rozumiesz ich branżę ({keyword}), nie tylko technikalia.
-
-Opisz tę jedną rzecz językiem efektu biznesowego (co zyskają/przestaną tracić), nie językiem technicznym.
-Na końcu zostaw link do pełnego raportu bez nacisku: {BOOKING_LINK}
-
-Dzień dobry na początku. Max 80 słów. Bez wykrzykników. Temat: konkretny, nawiązuje do wartości.
-STOPKA po "---": "{opt_out}"
+Write in {language_name}, matching the website language.
+Do not write a reminder. Share one practical thing they can improve today and explain the business effect in plain language.
+Keep it under 80 words, calm and useful, with a soft CTA linking to {BOOKING_LINK}.
+After '---', include: "{opt_out}"
+Return JSON only.
 
 JSON:
 {{"subject": "...", "body": "..."}}""",
 
-        2: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #2 (dzień 7) do właściciela {domain} (branża: {keyword}).
+        2: f"""You are {sender_name}, {sender_title}. Write follow-up #2 for day {day} to the owner of {domain}. Niche: {keyword or 'unknown'}.
+Previous subject: "{original_subject}"
+{page_ctx_section}
+FINDINGS:
+{findings}
 
-Poprzedni temat: "{original_subject}"
-Znaleziska: {findings}
-
-━━━ ZADANIE ━━━
-Krótki, wartościowy mail. Nie przypomnienie — jeden konkretny fakt który ich zaskoczy lub uświadomi coś o ich biznesie.
-Np. jak Google ocenia strony z ich problemem technicznym, albo jak potencjalny klient widzi ich stronę vs konkurencję.
-Konkretnie i po polsku — kulturalnie, ale bez owijania w bawełnę.
-Krótkie CTA: {BOOKING_LINK}
-
-Dzień dobry na początku. Max 60 słów. Temat: konkretny fakt lub pytanie retoryczne.
-STOPKA po "---": "{opt_out}"
+Write in {language_name}, matching the website language.
+Keep it short and valuable. Share one concrete observation about how this issue can affect visibility, trust, or conversions for this type of business.
+Keep it under 60 words and include a brief CTA with {BOOKING_LINK}.
+After '---', include: "{opt_out}"
+Return JSON only.
 
 JSON:
 {{"subject": "...", "body": "..."}}""",
 
-        3: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz follow-up #3 (dzień 14) do właściciela {domain} (branża: {keyword}).
+        3: f"""You are {sender_name}, {sender_title}. Write follow-up #3 for day {day} to the owner of {domain}. Niche: {keyword or 'unknown'}.
+Previous subject: "{original_subject}"
+{page_ctx_section}
+Main issue: {top_issue[:120]}
 
-Poprzedni temat: "{original_subject}"
-Główny problem: {top_issue[:100]}
-
-━━━ ZADANIE ━━━
-Krótka historia z praktyki — case z branży {keyword}. Ktoś miał ten sam problem co {domain}.
-Co się zmieniło po naprawieniu? Realistycznie — nie "wzrost 300%" tylko "przestał tracić zapytania przez X" albo "Google zaczął go pokazywać wyżej".
-Zostaw link: {BOOKING_LINK}
-
-Dzień dobry na początku. Max 70 słów. Pisz jak człowiek, nie jak case study. Temat: nawiązuje do branży.
-STOPKA po "---": "{opt_out}"
+Write in {language_name}, matching the website language.
+Use a short realistic example from a similar business. Explain what improved after fixing a similar issue without making exaggerated claims.
+Keep it under 70 words and include {BOOKING_LINK}.
+After '---', include: "{opt_out}"
+Return JSON only.
 
 JSON:
 {{"subject": "...", "body": "..."}}""",
 
-        4: f"""Jesteś {SENDER_NAME}, {SENDER_TITLE}. Wysyłasz ostatni follow-up #4 (dzień 21) do właściciela {domain} (branża: {keyword}).
+        4: f"""You are {sender_name}, {sender_title}. Write the final follow-up #4 for day {day} to the owner of {domain}. Niche: {keyword or 'unknown'}.
+Previous subject: "{original_subject}"
+{page_ctx_section}
 
-Poprzedni temat: "{original_subject}"
-
-━━━ ZADANIE ━━━
-Ostatnia wiadomość — powiedz to wprost na początku. W Polsce to jest cenione.
-Zostaw im raport jako prezent — coś konkretnego czego mogą użyć kiedy przyjdzie czas: {BOOKING_LINK}
-Życz powodzenia. Zostaw drzwi otwarte. Zero presji, zero żalu.
-
-Dzień dobry na początku. Max 55 słów. Ciepły ale definitywny ton.
-STOPKA po "---": "{opt_out}"
+Write in {language_name}, matching the website language.
+Make it clear this is the last note. Leave the report as a useful resource for later, wish them well, and keep the door open without pressure.
+Keep it under 55 words and include {BOOKING_LINK}.
+After '---', include: "{opt_out}"
+Return JSON only.
 
 JSON:
 {{"subject": "...", "body": "..."}}""",
@@ -413,12 +507,20 @@ async def generate_email(
 ) -> dict:
     """Generate main cold email + 4 follow-ups."""
     domain = site_data.get("domain", "")
-    language = _detect_language(keyword, country, domain)
+    language = _detect_language(site_data, keyword, country, domain)
     audit = _build_audit_summary(site_data)
     page_context = _build_page_context(site_data)
 
     # Generate main email
-    main_prompt = _build_main_prompt(audit, keyword, language, sender_offer, page_context)
+    main_prompt = _build_main_prompt(
+        audit,
+        keyword,
+        language,
+        sender_name,
+        SENDER_TITLE,
+        sender_offer,
+        page_context,
+    )
     result = await _call_llm(main_prompt)
     result = _ensure_footer(result, language)
     result["language"] = language
@@ -429,7 +531,18 @@ async def generate_email(
     followup_schedule = [(1, 3), (2, 7), (3, 14), (4, 21)]
     import asyncio
     followup_tasks = [
-        _call_llm(_build_followup_prompt(audit, keyword, language, sender_offer, num, day, original_subject))
+        _call_llm(_build_followup_prompt(
+            audit,
+            keyword,
+            language,
+            sender_name,
+            SENDER_TITLE,
+            sender_offer,
+            num,
+            day,
+            original_subject,
+            page_context,
+        ))
         for num, day in followup_schedule
     ]
     followup_results = await asyncio.gather(*followup_tasks, return_exceptions=True)
