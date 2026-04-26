@@ -423,7 +423,7 @@ async def _call_llm(prompt: str) -> dict:
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                     "HTTP-Referer": "https://webleadscraper.pl",
-                    "X-Title": "WebLeadScraper",
+                    "X-Title": "Piotr Serczynski",
                 },
                 json={
                     "model": MODEL,
