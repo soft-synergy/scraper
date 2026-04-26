@@ -430,6 +430,7 @@ async def _call_llm(prompt: str) -> dict:
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 800,
                     "temperature": 0.65,
+                    "provider": {"order": ["Phala"]},
                 },
             )
         if resp.status_code in (500, 502, 503, 504):
