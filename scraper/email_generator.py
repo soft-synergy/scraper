@@ -416,7 +416,7 @@ async def _call_llm(prompt: str) -> dict:
     for attempt in range(3):
         if attempt > 0:
             await asyncio.sleep(2 ** attempt)  # 2s, 4s
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
             resp = await client.post(
                 OPENROUTER_URL,
                 headers={
@@ -527,37 +527,32 @@ async def generate_email(
 
     original_subject = result.get("subject", "")
 
-    # Generate 4 follow-ups in parallel
+    # Generate 4 follow-ups sequentially to avoid rate limiting
     followup_schedule = [(1, 3), (2, 7), (3, 14), (4, 21)]
-    import asyncio
-    followup_tasks = [
-        _call_llm(_build_followup_prompt(
-            audit,
-            keyword,
-            language,
-            sender_name,
-            SENDER_TITLE,
-            sender_offer,
-            num,
-            day,
-            original_subject,
-            page_context,
-        ))
-        for num, day in followup_schedule
-    ]
-    followup_results = await asyncio.gather(*followup_tasks, return_exceptions=True)
-
     follow_ups = []
-    for (num, day), fu_result in zip(followup_schedule, followup_results):
-        if isinstance(fu_result, Exception):
-            continue
-        fu_result = _ensure_footer(fu_result, language)
-        follow_ups.append({
-            "follow_up_number": num,
-            "send_on_day": day,
-            "subject": fu_result.get("subject", ""),
-            "body": fu_result.get("body", ""),
-        })
+    for num, day in followup_schedule:
+        try:
+            fu_result = await _call_llm(_build_followup_prompt(
+                audit,
+                keyword,
+                language,
+                sender_name,
+                SENDER_TITLE,
+                sender_offer,
+                num,
+                day,
+                original_subject,
+                page_context,
+            ))
+            fu_result = _ensure_footer(fu_result, language)
+            follow_ups.append({
+                "follow_up_number": num,
+                "send_on_day": day,
+                "subject": fu_result.get("subject", ""),
+                "body": fu_result.get("body", ""),
+            })
+        except Exception:
+            pass
 
     result["follow_ups"] = follow_ups
 
