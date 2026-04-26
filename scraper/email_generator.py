@@ -318,7 +318,7 @@ RULES:
 5. Tone: direct, calm, credible, human. No hype, no exclamation marks, no ALL CAPS.
 6. Keep the body under 90 words.
 7. Include a concrete CTA offering a short 15-minute walkthrough of the report and include this link: {BOOKING_LINK}
-8. Sign as: {sender_name}, {sender_title}
+8. Sign EXACTLY as: {sender_name}, {sender_title} — NEVER write "Your Name", "[Name]", or any placeholder. The sender name is {sender_name}.
 9. After a separator line '---', include exactly this opt-out line in {language_name} if available: "{opt_out}"
 10. Return valid JSON only.
 
@@ -355,6 +355,7 @@ FINDINGS:
 Write in {language_name}, matching the website language.
 Do not write a reminder. Share one practical thing they can improve today and explain the business effect in plain language.
 Keep it under 80 words, calm and useful, with a soft CTA linking to {BOOKING_LINK}.
+Sign EXACTLY as: {sender_name}, {sender_title} — NEVER use "Your Name" or any placeholder.
 After '---', include: "{opt_out}"
 Return JSON only.
 
@@ -370,6 +371,7 @@ FINDINGS:
 Write in {language_name}, matching the website language.
 Keep it short and valuable. Share one concrete observation about how this issue can affect visibility, trust, or conversions for this type of business.
 Keep it under 60 words and include a brief CTA with {BOOKING_LINK}.
+Sign EXACTLY as: {sender_name}, {sender_title} — NEVER use "Your Name" or any placeholder.
 After '---', include: "{opt_out}"
 Return JSON only.
 
@@ -384,6 +386,7 @@ Main issue: {top_issue[:120]}
 Write in {language_name}, matching the website language.
 Use a short realistic example from a similar business. Explain what improved after fixing a similar issue without making exaggerated claims.
 Keep it under 70 words and include {BOOKING_LINK}.
+Sign EXACTLY as: {sender_name}, {sender_title} — NEVER use "Your Name" or any placeholder.
 After '---', include: "{opt_out}"
 Return JSON only.
 
@@ -397,6 +400,7 @@ Previous subject: "{original_subject}"
 Write in {language_name}, matching the website language.
 Make it clear this is the last note. Leave the report as a useful resource for later, wish them well, and keep the door open without pressure.
 Keep it under 55 words and include {BOOKING_LINK}.
+Sign EXACTLY as: {sender_name}, {sender_title} — NEVER use "Your Name" or any placeholder.
 After '---', include: "{opt_out}"
 Return JSON only.
 
@@ -477,6 +481,23 @@ _BOOKING_PLACEHOLDERS = [
 ]
 
 
+_NAME_PLACEHOLDERS = [
+    "Your Name", "[Your Name]", "[Name]", "[Imię]", "[Imię i nazwisko]",
+    "[Ihr Name]", "[Votre nom]", "[Su nombre]", "[Il tuo nome]",
+]
+
+
+def _fix_sender_name(result: dict, sender_name: str, sender_title: str) -> dict:
+    body = result.get("body", "")
+    subject = result.get("subject", "")
+    for placeholder in _NAME_PLACEHOLDERS:
+        body = body.replace(placeholder, sender_name)
+        subject = subject.replace(placeholder, sender_name)
+    result["body"] = body
+    result["subject"] = subject
+    return result
+
+
 def _ensure_footer(result: dict, language: str) -> dict:
     """Guarantee opt-out footer and real booking link are present."""
     body = result.get("body", "")
@@ -523,6 +544,7 @@ async def generate_email(
         page_context,
     )
     result = await _call_llm(main_prompt)
+    result = _fix_sender_name(result, sender_name, SENDER_TITLE)
     result = _ensure_footer(result, language)
     result["language"] = language
 
@@ -545,6 +567,7 @@ async def generate_email(
                 original_subject,
                 page_context,
             ))
+            fu_result = _fix_sender_name(fu_result, sender_name, SENDER_TITLE)
             fu_result = _ensure_footer(fu_result, language)
             follow_ups.append({
                 "follow_up_number": num,
