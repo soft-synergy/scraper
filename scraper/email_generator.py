@@ -428,7 +428,7 @@ async def _call_llm(prompt: str) -> dict:
                 json={
                     "model": MODEL,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 800,
+                    "max_tokens": 4096,
                     "temperature": 0.65,
                     "provider": {"order": ["Phala"]},
                 },
