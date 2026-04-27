@@ -17,7 +17,7 @@ import httpx
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "google/gemini-3-flash"
+MODEL = "google/gemini-3-flash-preview"
 
 SENDER_NAME = "Piotr Serczynski"
 SENDER_TITLE = "specjalista ds. bezpieczeństwa stron internetowych"
@@ -434,7 +434,6 @@ async def _call_llm(prompt: str) -> dict:
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 4096,
                     "temperature": 0.65,
-                    "provider": {"order": ["Phala"]},
                 },
             )
         if resp.status_code in (500, 502, 503, 504):
