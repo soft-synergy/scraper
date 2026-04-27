@@ -17,7 +17,7 @@ import httpx
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "moonshotai/kimi-k2.6"
+MODEL = "qwen/qwen3-32b"
 
 SENDER_NAME = "Piotr Serczynski"
 SENDER_TITLE = "specjalista ds. bezpieczeństwa stron internetowych"
